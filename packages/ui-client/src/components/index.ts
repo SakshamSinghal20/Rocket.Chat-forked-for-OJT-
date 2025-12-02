@@ -17,3 +17,5 @@ export { default as UserAutoComplete } from './UserAutoComplete';
 export * from './GenericMenu';
 export * from './Modal';
 export * from './Wizard';
+export * from './CustomScrollbars';
+export * from './Page';
