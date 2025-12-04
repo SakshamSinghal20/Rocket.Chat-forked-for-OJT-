@@ -200,40 +200,92 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
 }
 
 // ============================================================================
-// Generate Pie Chart Results
+// Generate Pie Chart Image URL (using QuickChart.io)
 // ============================================================================
 
-function generatePieChart(poll: Poll): string {
+function generatePieChartUrl(poll: Poll): string {
+    const stats = calculateStats(poll);
+    const colors = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#f97316'];
+    
+    // Build chart data
+    const labels = stats.options.map(o => o.text);
+    const data = stats.options.map(o => o.votes);
+    const backgroundColors = stats.options.map((_, i) => colors[i % colors.length]);
+    
+    const chartConfig = {
+        type: 'pie',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: backgroundColors,
+                borderWidth: 2,
+                borderColor: '#1f2329'
+            }]
+        },
+        options: {
+            plugins: {
+                title: {
+                    display: true,
+                    text: poll.question,
+                    font: { size: 16, weight: 'bold' },
+                    color: '#ffffff'
+                },
+                legend: {
+                    position: 'bottom',
+                    labels: { color: '#ffffff', font: { size: 12 } }
+                },
+                datalabels: {
+                    display: true,
+                    color: '#ffffff',
+                    font: { weight: 'bold', size: 14 },
+                    formatter: (value: number, ctx: any) => {
+                        const total = ctx.dataset.data.reduce((a: number, b: number) => a + b, 0);
+                        const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+                        return pct > 0 ? pct + '%' : '';
+                    }
+                }
+            }
+        }
+    };
+    
+    const chartJson = encodeURIComponent(JSON.stringify(chartConfig));
+    return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%231f2329&width=500&height=400';
+}
+
+function generatePieChartMessage(poll: Poll): { msg: string; attachments: any[] } {
     const stats = calculateStats(poll);
     const emojis = ['🔴', '🔵', '🟢', '🟡', '🟣', '🟠'];
     const maxVotes = Math.max(...stats.options.map(o => o.votes));
     
-    let chart = '📊 **POLL RESULTS - PIE CHART**\n\n';
-    chart += '**' + poll.question + '**\n';
-    chart += '━'.repeat(25) + '\n\n';
+    // Generate pie chart image URL
+    const chartUrl = generatePieChartUrl(poll);
+    
+    // Build text summary
+    let summary = '📊 **POLL RESULTS**\n\n';
+    summary += '**' + poll.question + '**\n\n';
     
     stats.options.forEach((opt, i) => {
         const emoji = emojis[i % emojis.length];
-        const bar = generateProgressBar(opt.percentage);
         const winner = (opt.votes === maxVotes && opt.votes > 0) ? ' 🏆' : '';
+        summary += emoji + ' **' + opt.text + '**: ' + opt.percentage + '% (' + opt.votes + ')' + winner + '\n';
         
-        chart += emoji + ' **' + opt.text + '**' + winner + '\n';
-        chart += '   ' + bar + ' ' + opt.percentage + '% (' + opt.votes + ' votes)\n';
-        
-        // Show voters for public polls
         if (!poll.isAnonymous && opt.voterNames.length > 0) {
-            chart += '   _Voters: ' + opt.voterNames.join(', ') + '_\n';
+            summary += '   _' + opt.voterNames.join(', ') + '_\n';
         }
-        chart += '\n';
     });
     
-    chart += '━'.repeat(25) + '\n';
-    chart += '👥 **Total Voters:** ' + stats.totalVoters + '\n';
-    chart += '📝 **Total Votes:** ' + stats.totalVotes + '\n';
-    chart += (poll.isAnonymous ? '🔒 Anonymous Poll' : '👁 Public Poll') + '\n';
-    chart += (poll.allowMultiple ? '☑️ Multiple Choice' : '⭕ Single Choice') + '\n';
+    summary += '\n👥 ' + stats.totalVoters + ' voters • 📝 ' + stats.totalVotes + ' votes';
+    summary += '\n' + (poll.isAnonymous ? '🔒 Anonymous' : '👁 Public');
     
-    return chart;
+    // Return message with image attachment
+    return {
+        msg: summary,
+        attachments: [{
+            image_url: chartUrl,
+            title: '📊 Pie Chart Results'
+        }]
+    };
 }
 
 // ============================================================================
@@ -472,11 +524,12 @@ Meteor.methods({
         if (!poll) throw new Meteor.Error('not-found', 'Poll not found');
         if (!poll.isClosed) throw new Meteor.Error('not-closed', 'Close the poll first');
 
-        // Generate and send pie chart
-        const chart = generatePieChart(poll);
+        // Generate and send pie chart with image
+        const { msg, attachments } = generatePieChartMessage(poll);
         await executeSendMessage(userId, {
             rid: poll.roomId,
-            msg: chart
+            msg,
+            attachments
         });
 
         return { success: true };
