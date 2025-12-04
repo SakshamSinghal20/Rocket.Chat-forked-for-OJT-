@@ -205,12 +205,33 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
 
 function generatePieChartUrl(poll: Poll): string {
     const stats = calculateStats(poll);
-    const colors = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#f97316'];
     
-    // Build chart data
-    const labels = stats.options.map(o => o.text);
-    const data = stats.options.map(o => o.votes);
-    const backgroundColors = stats.options.map((_, i) => colors[i % colors.length]);
+    // Filter out options with 0 votes for cleaner chart
+    const nonZeroOptions = stats.options.filter(o => o.votes > 0);
+    
+    // If no votes, show placeholder
+    if (nonZeroOptions.length === 0) {
+        const placeholderConfig = {
+            type: 'pie',
+            data: {
+                labels: ['No votes yet'],
+                datasets: [{ data: [1], backgroundColor: ['#6b7280'] }]
+            },
+            options: {
+                plugins: {
+                    legend: { display: false },
+                    datalabels: { display: false }
+                }
+            }
+        };
+        const json = encodeURIComponent(JSON.stringify(placeholderConfig));
+        return 'https://quickchart.io/chart?c=' + json + '&backgroundColor=%232f343d&width=400&height=400';
+    }
+    
+    const labels = nonZeroOptions.map(o => o.text + ' (' + o.percentage + '%)');
+    const data = nonZeroOptions.map(o => o.votes);
+    const colors = ['#dc2626', '#2563eb', '#16a34a', '#ca8a04', '#9333ea', '#ea580c'];
+    const bgColors = nonZeroOptions.map((_, i) => colors[i % colors.length]);
     
     const chartConfig = {
         type: 'pie',
@@ -218,31 +239,34 @@ function generatePieChartUrl(poll: Poll): string {
             labels: labels,
             datasets: [{
                 data: data,
-                backgroundColor: backgroundColors,
-                borderWidth: 2,
-                borderColor: '#1f2329'
+                backgroundColor: bgColors,
+                borderColor: '#2f343d',
+                borderWidth: 3
             }]
         },
         options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            layout: { padding: 20 },
             plugins: {
-                title: {
-                    display: true,
-                    text: poll.question,
-                    font: { size: 16, weight: 'bold' },
-                    color: '#ffffff'
-                },
                 legend: {
-                    position: 'bottom',
-                    labels: { color: '#ffffff', font: { size: 12 } }
+                    position: 'right',
+                    labels: {
+                        color: '#e4e7ea',
+                        font: { size: 14, weight: 'bold' },
+                        padding: 15,
+                        usePointStyle: true,
+                        pointStyle: 'circle'
+                    }
                 },
                 datalabels: {
                     display: true,
                     color: '#ffffff',
-                    font: { weight: 'bold', size: 14 },
-                    formatter: (value: number, ctx: any) => {
-                        const total = ctx.dataset.data.reduce((a: number, b: number) => a + b, 0);
-                        const pct = total > 0 ? Math.round((value / total) * 100) : 0;
-                        return pct > 0 ? pct + '%' : '';
+                    font: { weight: 'bold', size: 16 },
+                    textShadowColor: 'rgba(0,0,0,0.5)',
+                    textShadowBlur: 4,
+                    formatter: function(value: number) {
+                        return value > 0 ? value : '';
                     }
                 }
             }
@@ -250,7 +274,8 @@ function generatePieChartUrl(poll: Poll): string {
     };
     
     const chartJson = encodeURIComponent(JSON.stringify(chartConfig));
-    return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%231f2329&width=500&height=400';
+    // Use equal width and height for perfect circle
+    return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%232f343d&width=500&height=500&devicePixelRatio=2';
 }
 
 function generatePieChartMessage(poll: Poll): { msg: string; attachments: any[] } {
@@ -289,32 +314,57 @@ function generatePieChartMessage(poll: Poll): { msg: string; attachments: any[] 
 }
 
 // ============================================================================
-// Schedule Poll
+// Schedule Poll - Robust Implementation
 // ============================================================================
 
 function schedulePoll(poll: Poll) {
     if (!poll.scheduledAt) return;
     
+    // Clear any existing timer for this poll
+    const existingTimer = scheduledTimers.get(poll.id);
+    if (existingTimer) {
+        clearTimeout(existingTimer);
+        scheduledTimers.delete(poll.id);
+    }
+    
     const delay = poll.scheduledAt.getTime() - Date.now();
     
     if (delay <= 0) {
         // Already past, publish immediately
+        console.log('[Poll] Scheduled time passed, publishing now: ' + poll.id);
         publishPoll(poll);
         return;
     }
     
-    console.log('[Poll] Scheduled poll ' + poll.id + ' for ' + poll.scheduledAt.toISOString());
+    // Cap timeout to avoid overflow (max ~24 days)
+    const maxDelay = 2147483647; // Max 32-bit signed int
+    const actualDelay = Math.min(delay, maxDelay);
+    
+    console.log('[Poll] Scheduling poll ' + poll.id + ' in ' + Math.round(actualDelay / 1000) + ' seconds');
     
     const timer = setTimeout(() => {
-        publishPoll(poll);
         scheduledTimers.delete(poll.id);
-    }, delay);
+        
+        // Double-check poll still exists and is scheduled
+        const currentPoll = polls.get(poll.id);
+        if (currentPoll && currentPoll.scheduledAt && !currentPoll.messageId) {
+            publishPoll(currentPoll);
+        }
+    }, actualDelay);
     
     scheduledTimers.set(poll.id, timer);
 }
 
 async function publishPoll(poll: Poll) {
+    // Prevent double-publishing
+    if (poll.messageId) {
+        console.log('[Poll] Already published: ' + poll.id);
+        return;
+    }
+    
     try {
+        console.log('[Poll] Publishing poll: ' + poll.id);
+        
         const sent = await executeSendMessage(poll.creator, {
             rid: poll.roomId,
             msg: '',
@@ -324,9 +374,10 @@ async function publishPoll(poll: Poll) {
         if (sent?._id) {
             poll.messageId = sent._id;
             poll.scheduledAt = undefined;
+            console.log('[Poll] Successfully published: ' + poll.id);
+        } else {
+            console.error('[Poll] No message ID returned for: ' + poll.id);
         }
-        
-        console.log('[Poll] Published scheduled poll ' + poll.id);
     } catch (err) {
         console.error('[Poll] Failed to publish scheduled poll:', err);
     }
@@ -544,6 +595,47 @@ Meteor.methods({
         
         return await canClosePoll(userId, poll);
     }
+});
+
+// ============================================================================
+// Startup: Re-schedule pending polls (handles server restart)
+// ============================================================================
+
+function checkPendingScheduledPolls() {
+    const now = Date.now();
+    let rescheduled = 0;
+    let published = 0;
+    
+    polls.forEach((poll) => {
+        // Only process polls that are scheduled but not yet published
+        if (poll.scheduledAt && !poll.messageId && !poll.isClosed) {
+            if (poll.scheduledAt.getTime() <= now) {
+                // Time has passed, publish immediately
+                publishPoll(poll);
+                published++;
+            } else {
+                // Re-schedule for future
+                schedulePoll(poll);
+                rescheduled++;
+            }
+        }
+    });
+    
+    if (rescheduled > 0 || published > 0) {
+        console.log('[Poll] Startup check: ' + published + ' published, ' + rescheduled + ' rescheduled');
+    }
+}
+
+// Run startup check after a short delay to ensure Meteor is ready
+Meteor.startup(() => {
+    Meteor.setTimeout(() => {
+        checkPendingScheduledPolls();
+    }, 5000); // 5 second delay
+    
+    // Also run periodic check every 60 seconds (catches edge cases)
+    Meteor.setInterval(() => {
+        checkPendingScheduledPolls();
+    }, 60000);
 });
 
 console.log('[Poll] System initialized');
