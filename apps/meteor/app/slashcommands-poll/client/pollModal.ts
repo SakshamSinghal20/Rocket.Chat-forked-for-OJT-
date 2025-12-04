@@ -56,6 +56,56 @@ function showToast(message: string, type: 'success' | 'error' | 'info' = 'info')
 }
 
 // ============================================================================
+// View Voters Modal
+// ============================================================================
+
+function showVotersModal(data: { question: string; isAnonymous: boolean; options: { text: string; votes: number; voters: string[] }[] }) {
+    // Remove existing modal if any
+    const existing = document.getElementById('voters-modal-overlay');
+    if (existing) existing.remove();
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'voters-modal-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;';
+    
+    let optionsHtml = '';
+    data.options.forEach((opt) => {
+        const votersList = data.isAnonymous 
+            ? '<span style="color:#9ca3af;font-style:italic;">Anonymous voting - names hidden</span>'
+            : (opt.voters.length > 0 
+                ? opt.voters.map(v => '<span style="background:#374151;padding:4px 10px;border-radius:12px;margin:3px;display:inline-block;font-size:13px;">' + v + '</span>').join('')
+                : '<span style="color:#6b7280;font-style:italic;">No votes yet</span>');
+        
+        optionsHtml += '<div style="margin-bottom:16px;padding:12px;background:#1f2937;border-radius:8px;">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+            '<span style="font-weight:600;color:#e5e7eb;">' + opt.text + '</span>' +
+            '<span style="background:#3b82f6;color:#fff;padding:4px 12px;border-radius:12px;font-size:13px;">' + opt.votes + ' vote' + (opt.votes !== 1 ? 's' : '') + '</span>' +
+            '</div>' +
+            '<div style="color:#d1d5db;">' + votersList + '</div>' +
+            '</div>';
+    });
+    
+    overlay.innerHTML = '<div style="background:#111827;border-radius:12px;width:90%;max-width:500px;max-height:80vh;overflow:auto;box-shadow:0 25px 50px rgba(0,0,0,0.5);">' +
+        '<div style="padding:20px;border-bottom:1px solid #374151;display:flex;justify-content:space-between;align-items:center;">' +
+        '<h3 style="margin:0;color:#f3f4f6;font-size:18px;">👥 Poll Voters</h3>' +
+        '<button id="voters-modal-close" style="background:none;border:none;color:#9ca3af;font-size:24px;cursor:pointer;padding:0;line-height:1;">&times;</button>' +
+        '</div>' +
+        '<div style="padding:20px;">' +
+        '<div style="color:#9ca3af;margin-bottom:16px;font-size:14px;">' + data.question + '</div>' +
+        optionsHtml +
+        '</div>' +
+        '</div>';
+    
+    document.body.appendChild(overlay);
+    
+    // Close handlers
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
+    document.getElementById('voters-modal-close')?.addEventListener('click', () => overlay.remove());
+}
+
+// ============================================================================
 // Button Click Interceptor
 // ============================================================================
 
@@ -69,7 +119,7 @@ function setupButtonInterceptor() {
         let actionValue = '';
         for (const attr of Array.from(button.attributes)) {
             const val = attr.value || '';
-            if (val.startsWith('pollvote_') || val.startsWith('pollclose_') || val.startsWith('pollexport_')) {
+            if (val.startsWith('pollvote_') || val.startsWith('pollclose_') || val.startsWith('pollexport_') || val.startsWith('pollviewers_')) {
                 actionValue = val;
                 break;
             }
@@ -144,6 +194,20 @@ function setupButtonInterceptor() {
                 showToast(chartType === 'bar' ? 'Bar graph exported!' : 'Pie chart exported!', 'success');
             } catch (err: any) {
                 showToast(err?.reason || 'Export failed', 'error');
+            }
+            return;
+        }
+        
+        // Handle View Voters
+        if (actionValue.startsWith('pollviewers_')) {
+            const pollId = actionValue.replace('pollviewers_', '');
+            
+            try {
+                // @ts-ignore
+                const result = await Meteor.callAsync('poll.getVoters', pollId);
+                showVotersModal(result);
+            } catch (err: any) {
+                showToast(err?.reason || 'Failed to load voters', 'error');
             }
         }
     }, true);

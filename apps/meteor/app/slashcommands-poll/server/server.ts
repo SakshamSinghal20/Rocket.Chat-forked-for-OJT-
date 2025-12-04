@@ -113,7 +113,6 @@ async function getUserDisplayName(userId: string): Promise<string> {
 function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
     const stats = calculateStats(poll, viewerId);
     const blocks: any[] = [];
-    const emojis = ['🔴', '🔵', '🟢', '🟡', '🟣', '🟠'];
     
     // Header with status
     const status = poll.isClosed ? ' 🔒 CLOSED' : '';
@@ -122,33 +121,26 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
         text: { type: 'mrkdwn', text: '📊 *' + poll.question + '*' + status }
     });
     
-    // Poll settings info
+    // Poll settings info (NO poll ID shown)
     const info = [
         poll.isAnonymous ? '🔒 Anonymous' : '👁 Public',
-        poll.allowMultiple ? '☑️ Multiple choice' : '⭕ Single choice'
+        poll.allowMultiple ? '☑️ Multiple choice' : '○ Single choice'
     ];
     blocks.push({
         type: 'context',
-        elements: [{ type: 'mrkdwn', text: info.join(' • ') + ' • ID: `' + poll.id + '`' }]
+        elements: [{ type: 'mrkdwn', text: info.join(' • ') }]
     });
     
-    // Options
+    // Options - Clean layout without voter names inline
     stats.options.forEach((opt, i) => {
-        const emoji = emojis[i % emojis.length];
         const bar = generateProgressBar(opt.percentage);
-        const circle = opt.isSelected ? '🔘' : '⭕';
+        // Use text symbols instead of emojis for cleaner look
+        const selector = opt.isSelected ? '●' : '○';
         const count = opt.votes;
         
-        // Format: Circle OptionText | Progress Bar | Count
-        let optionLine = circle + ' *' + opt.text + '*';
-        optionLine += '\n    ' + bar + ' ' + opt.percentage + '% • ' + count + ' vote' + (count !== 1 ? 's' : '');
-        
-        // For public polls, show voters (if not anonymous and has votes)
-        if (!poll.isAnonymous && opt.votes > 0 && opt.voterNames.length > 0) {
-            const voterList = opt.voterNames.slice(0, 3).join(', ');
-            const more = opt.voterNames.length > 3 ? ' +' + (opt.voterNames.length - 3) + ' more' : '';
-            optionLine += '\n    _Voters: ' + voterList + more + '_';
-        }
+        // Clean format: Selector OptionText | Progress Bar | Count
+        let optionLine = selector + ' *' + opt.text + '*';
+        optionLine += '\n     ' + bar + '  ' + opt.percentage + '%  •  ' + count + ' vote' + (count !== 1 ? 's' : '');
         
         const block: any = {
             type: 'section',
@@ -159,7 +151,7 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
         if (!poll.isClosed) {
             block.accessory = {
                 type: 'button',
-                text: { type: 'plain_text', text: opt.isSelected ? '✓' : emoji, emoji: true },
+                text: { type: 'plain_text', text: opt.isSelected ? '✓' : '○', emoji: false },
                 value: 'pollvote_' + poll.id + '_' + opt.id,
                 actionId: 'pollvote_' + poll.id + '_' + opt.id
             };
@@ -171,56 +163,66 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
     // Divider
     blocks.push({ type: 'divider' });
     
-    // Stats footer
+    // Stats footer with View Voters button for public polls
+    const footerText = '📈 ' + stats.totalVotes + ' vote' + (stats.totalVotes !== 1 ? 's' : '') + 
+                       '  •  👥 ' + stats.totalVoters + ' voter' + (stats.totalVoters !== 1 ? 's' : '') +
+                       '  •  by ' + (poll.creatorName || 'Unknown');
+    
     blocks.push({
         type: 'context',
-        elements: [{
-            type: 'mrkdwn',
-            text: '📈 ' + stats.totalVotes + ' vote' + (stats.totalVotes !== 1 ? 's' : '') + 
-                  ' • 👥 ' + stats.totalVoters + ' voter' + (stats.totalVoters !== 1 ? 's' : '') +
-                  ' • Created by ' + (poll.creatorName || 'Unknown')
-        }]
+        elements: [{ type: 'mrkdwn', text: footerText }]
     });
     
-    // Action buttons
+    // Action buttons row
+    const actionElements: any[] = [];
+    
+    // View Voters button (only for public polls with votes)
+    if (!poll.isAnonymous && stats.totalVotes > 0) {
+        actionElements.push({
+            type: 'button',
+            text: { type: 'plain_text', text: '👁 View Voters', emoji: true },
+            value: 'pollviewers_' + poll.id,
+            actionId: 'pollviewers_' + poll.id
+        });
+    }
+    
     if (!poll.isClosed) {
-        blocks.push({
-            type: 'actions',
-            elements: [{
-                type: 'button',
-                text: { type: 'plain_text', text: '🔒 Close Poll', emoji: true },
-                value: 'pollclose_' + poll.id,
-                actionId: 'pollclose_' + poll.id,
-                style: 'danger'
-            }]
+        actionElements.push({
+            type: 'button',
+            text: { type: 'plain_text', text: '🔒 Close Poll', emoji: true },
+            value: 'pollclose_' + poll.id,
+            actionId: 'pollclose_' + poll.id,
+            style: 'danger'
         });
     } else {
-        // Show export buttons for closed polls (pie and bar options)
+        // Export buttons for closed polls
+        actionElements.push({
+            type: 'button',
+            text: { type: 'plain_text', text: '🥧 Pie Chart', emoji: true },
+            value: 'pollexport_' + poll.id + '_pie',
+            actionId: 'pollexport_' + poll.id + '_pie'
+        });
+        actionElements.push({
+            type: 'button',
+            text: { type: 'plain_text', text: '📊 Bar Graph', emoji: true },
+            value: 'pollexport_' + poll.id + '_bar',
+            actionId: 'pollexport_' + poll.id + '_bar'
+        });
+    }
+    
+    if (actionElements.length > 0) {
         blocks.push({
             type: 'actions',
-            elements: [
-                {
-                    type: 'button',
-                    text: { type: 'plain_text', text: '🥧 Pie Chart', emoji: true },
-                    value: 'pollexport_' + poll.id + '_pie',
-                    actionId: 'pollexport_' + poll.id + '_pie'
-                },
-                {
-                    type: 'button',
-                    text: { type: 'plain_text', text: '📊 Bar Graph', emoji: true },
-                    value: 'pollexport_' + poll.id + '_bar',
-                    actionId: 'pollexport_' + poll.id + '_bar'
-                }
-            ]
+            elements: actionElements
         });
-        
-        // Closed timestamp
-        if (poll.closedAt) {
-            blocks.push({
-                type: 'context',
-                elements: [{ type: 'mrkdwn', text: '🔒 _Closed on ' + poll.closedAt.toLocaleString() + '_' }]
-            });
-        }
+    }
+    
+    // Closed timestamp
+    if (poll.isClosed && poll.closedAt) {
+        blocks.push({
+            type: 'context',
+            elements: [{ type: 'mrkdwn', text: '🔒 _Closed on ' + poll.closedAt.toLocaleString() + '_' }]
+        });
     }
     
     return blocks;
@@ -307,38 +309,44 @@ function generatePieChartUrl(poll: Poll): string {
 
 function generateBarChartUrl(poll: Poll): string {
     const stats = calculateStats(poll);
-    const labels = stats.options.map(o => o.text + ' (' + o.percentage + '%)');
+    const labels = stats.options.map(o => o.text);
     const data = stats.options.map(o => o.votes);
+    const percentages = stats.options.map(o => o.percentage);
     
-    // Use Rocket.Chat theme colors - subtle blue gradient
+    // Clean horizontal bar chart with Rocket.Chat theme
     const chartConfig = {
         type: 'horizontalBar',
         data: {
             labels: labels,
             datasets: [{
                 data: data,
-                backgroundColor: '#156ff5',
-                borderColor: '#1d74f5',
-                borderWidth: 0,
-                barThickness: 18,
-                borderRadius: 4
+                backgroundColor: '#2563eb',
+                borderColor: '#1d4ed8',
+                borderWidth: 1,
+                barThickness: 24,
+                borderRadius: 3,
+                barPercentage: 0.8,
+                categoryPercentage: 0.9
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            layout: { padding: { left: 10, right: 30, top: 10, bottom: 10 } },
+            layout: { 
+                padding: { left: 15, right: 50, top: 20, bottom: 20 } 
+            },
             plugins: {
                 legend: { display: false },
                 datalabels: {
                     display: true,
-                    color: '#e4e7ea',
+                    color: '#ffffff',
                     anchor: 'end',
                     align: 'end',
-                    offset: 4,
-                    font: { weight: 'bold', size: 13 },
-                    formatter: function(value: number) {
-                        return value;
+                    offset: 8,
+                    font: { weight: 'bold', size: 14 },
+                    formatter: function(value: number, ctx: any) {
+                        const pct = percentages[ctx.dataIndex];
+                        return value + ' (' + pct + '%)';
                     }
                 }
             },
@@ -346,17 +354,24 @@ function generateBarChartUrl(poll: Poll): string {
                 xAxes: [{
                     ticks: { 
                         beginAtZero: true, 
-                        display: false
+                        display: true,
+                        fontColor: '#9ca3af',
+                        fontSize: 11,
+                        stepSize: 1
                     },
-                    gridLines: { display: false }
+                    gridLines: { 
+                        display: true, 
+                        color: '#374151',
+                        drawBorder: false
+                    }
                 }],
                 yAxes: [{
                     gridLines: { display: false },
                     ticks: { 
-                        fontColor: '#e4e7ea', 
-                        fontSize: 13,
+                        fontColor: '#e5e7eb', 
+                        fontSize: 14,
                         fontStyle: 'bold',
-                        padding: 8
+                        padding: 12
                     }
                 }]
             }
@@ -364,9 +379,9 @@ function generateBarChartUrl(poll: Poll): string {
     };
     
     const chartJson = encodeURIComponent(JSON.stringify(chartConfig));
-    // Height based on number of options (50px per option + padding)
-    const height = Math.max(150, stats.options.length * 50 + 40);
-    return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%232f343d&width=550&height=' + height + '&devicePixelRatio=2';
+    // Wider chart, dynamic height based on options
+    const height = Math.max(180, stats.options.length * 55 + 60);
+    return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%231f2937&width=650&height=' + height + '&devicePixelRatio=2';
 }
 
 function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar'): { msg: string; attachments: any[] } {
@@ -735,32 +750,44 @@ Meteor.methods({
         // Get user display name for public polls
         const displayName = poll.isAnonymous ? '' : await getUserDisplayName(userId);
         
+        // Helper to safely remove voter from an option
+        const removeVoterFromOption = (opt: PollOption, odUserId: string) => {
+            const idx = opt.voters.indexOf(odUserId);
+            if (idx !== -1) {
+                opt.votes = Math.max(0, opt.votes - 1);
+                opt.voters.splice(idx, 1);
+                opt.voterNames.splice(idx, 1);
+            }
+        };
+        
+        // Helper to safely add voter to an option (prevents duplicates)
+        const addVoterToOption = (opt: PollOption, odUserId: string, name: string) => {
+            // Only add if not already in the list (prevent duplicates)
+            if (!opt.voters.includes(odUserId)) {
+                opt.votes++;
+                opt.voters.push(odUserId);
+                if (!poll.isAnonymous && name) {
+                    opt.voterNames.push(name);
+                }
+            }
+        };
+        
         if (poll.allowMultiple) {
             // Multiple choice: toggle this option
             if (wasSelected) {
-                option.votes = Math.max(0, option.votes - 1);
-                option.voters = option.voters.filter(v => v !== userId);
-                option.voterNames = option.voterNames.filter((_, i) => option.voters[i] !== userId);
+                removeVoterFromOption(option, userId);
             } else {
-                option.votes++;
-                option.voters.push(userId);
-                if (!poll.isAnonymous) option.voterNames.push(displayName);
+                addVoterToOption(option, userId, displayName);
             }
         } else {
-            // Single choice: remove from all, add to this one
+            // Single choice: remove from all options first
             poll.options.forEach(o => {
-                const idx = o.voters.indexOf(userId);
-                if (idx !== -1) {
-                    o.votes = Math.max(0, o.votes - 1);
-                    o.voters.splice(idx, 1);
-                    o.voterNames.splice(idx, 1);
-                }
+                removeVoterFromOption(o, userId);
             });
             
+            // Add to selected option (only if not previously selected)
             if (!wasSelected) {
-                option.votes++;
-                option.voters.push(userId);
-                if (!poll.isAnonymous) option.voterNames.push(displayName);
+                addVoterToOption(option, userId, displayName);
             }
         }
 
@@ -842,6 +869,39 @@ Meteor.methods({
         if (!poll) return false;
         
         return await canClosePoll(userId, poll);
+    },
+
+    // Get voters for View Voters popup
+    async 'poll.getVoters'(pollId: string) {
+        const userId = Meteor.userId();
+        if (!userId) throw new Meteor.Error('not-authorized');
+        
+        const poll = polls.get(pollId);
+        if (!poll) throw new Meteor.Error('not-found', 'Poll not found');
+        
+        // Don't reveal voters for anonymous polls
+        if (poll.isAnonymous) {
+            return {
+                question: poll.question,
+                isAnonymous: true,
+                options: poll.options.map(o => ({
+                    text: o.text,
+                    votes: o.votes,
+                    voters: [] // Empty for anonymous
+                }))
+            };
+        }
+        
+        // Return voter names for public polls
+        return {
+            question: poll.question,
+            isAnonymous: false,
+            options: poll.options.map(o => ({
+                text: o.text,
+                votes: o.votes,
+                voters: o.voterNames
+            }))
+        };
     }
 });
 
