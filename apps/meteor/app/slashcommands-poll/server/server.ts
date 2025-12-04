@@ -1,6 +1,7 @@
-// Poll System - Complete Implementation
+// Poll System - Rocket.Chat Native Theme with Admin Controls
 import { Meteor } from 'meteor/meteor';
 import { Rooms, Messages, Users } from '@rocket.chat/models';
+import { slashCommands } from '../../utils/server/slashCommand';
 import { executeSendMessage } from '../../lib/server/methods/sendMessage';
 import { notifyOnMessageChange } from '../../lib/server/lib/notifyListener';
 import { hasPermissionAsync } from '../../authorization/server/functions/hasPermission';
@@ -30,22 +31,19 @@ interface Poll {
     closedBy?: string;
     closedAt?: Date;
     createdAt: Date;
-    scheduledAt?: Date;
     totalVoters: Set<string>;
 }
 
-// In-memory storage (consider using MongoDB for persistence)
 const polls = new Map<string, Poll>();
-const scheduledPolls = new Map<string, NodeJS.Timeout>();
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
 function generateProgressBar(percentage: number): string {
-    const width = 12;
+    const width = 15;
     const filled = Math.round((percentage / 100) * width);
-    return '▓'.repeat(filled) + '░'.repeat(width - filled);
+    return '█'.repeat(filled) + '░'.repeat(width - filled);
 }
 
 function calculateStats(poll: Poll, viewerId?: string) {
@@ -70,72 +68,141 @@ async function isAdmin(userId: string): Promise<boolean> {
 }
 
 // ============================================================================
-// Generate Pie Chart (Text-based)
+// Pie Chart Results Message
 // ============================================================================
 
-function generatePieChart(poll: Poll): string {
+function generateResultsMessage(poll: Poll): string {
     const stats = calculateStats(poll);
+    
+    let msg = `📊 *POLL RESULTS*\n\n`;
+    msg += `*${poll.question}*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    
+    // Find winner
     const maxVotes = Math.max(...stats.options.map(o => o.votes));
-    
-    let chart = `\n📊 **POLL RESULTS: PIE CHART**\n\n`;
-    chart += `**${poll.question}**\n`;
-    chart += `${'━'.repeat(30)}\n\n`;
-    
-    // Pie chart visualization using Unicode
-    const pieSlices = ['🔴', '🔵', '🟢', '🟡', '🟣', '🟠'];
-    
-    stats.options.forEach((opt, i) => {
-        const slice = pieSlices[i % pieSlices.length];
-        const isWinner = opt.votes === maxVotes && opt.votes > 0;
-        const trophy = isWinner ? ' 🏆' : '';
-        const bar = generateProgressBar(opt.percentage);
-        
-        chart += `${slice} **${opt.text}**${trophy}\n`;
-        chart += `   ${bar} ${opt.percentage}% (${opt.votes} vote${opt.votes !== 1 ? 's' : ''})\n\n`;
-    });
-    
-    chart += `${'━'.repeat(30)}\n`;
-    chart += `👥 Total Voters: ${stats.totalVoters}\n`;
-    chart += `📝 Total Votes: ${stats.totalVotes}\n`;
-    chart += `${poll.isAnonymous ? '🔒 Anonymous Poll' : '👁 Public Poll'}\n`;
-    chart += `${poll.allowMultiple ? '☑️ Multiple Choice' : '⭕ Single Choice'}\n`;
-    
-    return chart;
-}
-
-// ============================================================================
-// Build Poll Message Text
-// ============================================================================
-
-function buildPollMessage(poll: Poll, viewerId?: string): string {
-    const stats = calculateStats(poll, viewerId);
-    
-    let msg = `📊 **POLL${poll.isClosed ? ' [CLOSED 🔒]' : ''}**\n\n`;
-    msg += `**${poll.question}**\n`;
-    msg += `${poll.isAnonymous ? '🔒 Anonymous' : '👁 Public'} • ${poll.allowMultiple ? '☑️ Multiple' : '⭕ Single'}\n\n`;
     
     stats.options.forEach((opt, i) => {
         const emoji = ['🔴', '🔵', '🟢', '🟡', '🟣'][i % 5];
+        const winner = opt.votes === maxVotes && opt.votes > 0 ? ' 🏆' : '';
         const bar = generateProgressBar(opt.percentage);
-        const selected = opt.isSelected ? ' ✓' : '';
         
-        msg += `${emoji} **${opt.text}**${selected}\n`;
-        msg += `   ${bar} ${opt.percentage}% (${opt.votes})\n\n`;
+        msg += `${emoji} *${opt.text}*${winner}\n`;
+        msg += `${bar} ${opt.percentage}% (${opt.votes})\n\n`;
     });
     
-    msg += `━━━━━━━━━━━━━━━\n`;
-    msg += `📈 ${stats.totalVotes} vote${stats.totalVotes !== 1 ? 's' : ''} • `;
-    msg += `👥 ${stats.totalVoters} voter${stats.totalVoters !== 1 ? 's' : ''}\n`;
-    msg += `🆔 Poll ID: \`${poll.id}\`\n`;
-    
-    if (!poll.isClosed) {
-        msg += `\n**To vote:** \`/poll-vote ${poll.id} A\` (or B, C, etc.)\n`;
-        msg += `**To close (admin):** \`/poll-close ${poll.id}\``;
-    } else {
-        msg += `\n**To export results:** \`/poll-export ${poll.id}\``;
-    }
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `👥 ${stats.totalVoters} voter${stats.totalVoters !== 1 ? 's' : ''} • `;
+    msg += `${stats.totalVotes} vote${stats.totalVotes !== 1 ? 's' : ''}\n`;
+    msg += `${poll.isAnonymous ? '🔒 Anonymous' : '👁 Public'} • `;
+    msg += `${poll.allowMultiple ? 'Multiple choice' : 'Single choice'}`;
     
     return msg;
+}
+
+// ============================================================================
+// Block Builder - Native Rocket.Chat Style
+// ============================================================================
+
+function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
+    const stats = calculateStats(poll, viewerId);
+    const blocks: any[] = [];
+    
+    // Header
+    const statusText = poll.isClosed ? ' [CLOSED 🔒]' : '';
+    blocks.push({
+        type: 'section',
+        text: {
+            type: 'mrkdwn',
+            text: `📊 *${poll.question}*${statusText}`
+        }
+    });
+    
+    // Settings line
+    const settings = [];
+    if (poll.isAnonymous) settings.push('🔒 Anonymous');
+    settings.push(poll.allowMultiple ? '☑️ Multiple choice' : '⭕ Single choice');
+    
+    blocks.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: settings.join(' • ') }]
+    });
+    
+    // Options
+    stats.options.forEach((opt, i) => {
+        const emoji = ['🔴', '🔵', '🟢', '🟡', '🟣'][i % 5];
+        const check = opt.isSelected ? '✅' : '⬜';
+        const bar = generateProgressBar(opt.percentage);
+        
+        const displayText = poll.isClosed
+            ? `${emoji} *${opt.text}*\n${bar} ${opt.percentage}% • ${opt.votes} vote${opt.votes !== 1 ? 's' : ''}`
+            : `${check} *${opt.text}*\n${bar} ${opt.percentage}% • ${opt.votes} vote${opt.votes !== 1 ? 's' : ''}`;
+        
+        const block: any = {
+            type: 'section',
+            blockId: `opt_${poll.id}_${opt.id}`,
+            text: { type: 'mrkdwn', text: displayText }
+        };
+        
+        // Vote button only for open polls
+        if (!poll.isClosed) {
+            block.accessory = {
+                type: 'button',
+                text: {
+                    type: 'plain_text',
+                    text: opt.isSelected ? '✓ Voted' : 'Vote',
+                    emoji: true
+                },
+                value: `${poll.id}|${opt.id}`,
+                actionId: `vote_${poll.id}_${opt.id}`,
+                appId: 'poll-app',
+                ...(opt.isSelected && { style: 'primary' })
+            };
+        }
+        
+        blocks.push(block);
+    });
+    
+    // Footer stats
+    blocks.push({
+        type: 'context',
+        elements: [{
+            type: 'mrkdwn',
+            text: `📈 ${stats.totalVotes} vote${stats.totalVotes !== 1 ? 's' : ''} • 👥 ${stats.totalVoters} voter${stats.totalVoters !== 1 ? 's' : ''} • by ${poll.creatorName || 'Unknown'}`
+        }]
+    });
+    
+    // CLOSE BUTTON - Always shown for open polls (permission checked on click)
+    if (!poll.isClosed) {
+        blocks.push({
+            type: 'actions',
+            blockId: `admin_${poll.id}`,
+            elements: [{
+                type: 'button',
+                text: {
+                    type: 'plain_text',
+                    text: '🔒 Close Poll (Admin)',
+                    emoji: true
+                },
+                value: poll.id,
+                actionId: `close_${poll.id}`,
+                appId: 'poll-app',
+                style: 'danger'
+            }]
+        });
+    }
+    
+    // Closed info
+    if (poll.isClosed && poll.closedAt) {
+        blocks.push({
+            type: 'context',
+            elements: [{
+                type: 'mrkdwn',
+                text: `🔒 _Closed on ${poll.closedAt.toLocaleString()}_`
+            }]
+        });
+    }
+    
+    return blocks;
 }
 
 // ============================================================================
@@ -146,11 +213,11 @@ async function updatePollMessage(poll: Poll): Promise<boolean> {
     if (!poll.messageId) return false;
     
     try {
-        const msg = buildPollMessage(poll);
+        const blocks = buildPollBlocks(poll);
         
         await Messages.updateOne(
             { _id: poll.messageId },
-            { $set: { msg, _updatedAt: new Date() } }
+            { $set: { blocks, _updatedAt: new Date() } }
         );
         
         await notifyOnMessageChange({ id: poll.messageId });
@@ -161,44 +228,6 @@ async function updatePollMessage(poll: Poll): Promise<boolean> {
     }
 }
 
-// ============================================================================
-// Schedule Poll
-// ============================================================================
-
-function schedulePoll(poll: Poll) {
-    if (!poll.scheduledAt) return;
-    
-    const delay = poll.scheduledAt.getTime() - Date.now();
-    if (delay <= 0) {
-        // Already past, publish now
-        publishScheduledPoll(poll);
-        return;
-    }
-    
-    const timeout = setTimeout(() => {
-        publishScheduledPoll(poll);
-    }, delay);
-    
-    scheduledPolls.set(poll.id, timeout);
-}
-
-async function publishScheduledPoll(poll: Poll) {
-    try {
-        const sent = await executeSendMessage(poll.creator, {
-            rid: poll.roomId,
-            msg: buildPollMessage(poll, poll.creator),
-        });
-        
-        if (sent?._id) {
-            poll.messageId = sent._id;
-            poll.scheduledAt = undefined;
-        }
-    } catch (err) {
-        console.error('[Poll] Failed to publish scheduled poll:', err);
-    }
-    
-    scheduledPolls.delete(poll.id);
-}
 
 // ============================================================================
 // Meteor Methods
@@ -211,24 +240,23 @@ Meteor.methods({
         roomId?: string;
         allowMultiple?: boolean;
         isAnonymous?: boolean;
-        scheduledAt?: string;
     }) {
         const userId = Meteor.userId();
         if (!userId) throw new Meteor.Error('not-authorized');
 
-        const { roomId, question, options, allowMultiple, isAnonymous, scheduledAt } = data;
+        const { roomId, question, options, allowMultiple, isAnonymous } = data;
         
-        if (!roomId) throw new Meteor.Error('invalid-room', 'Room ID is required');
+        if (!roomId) throw new Meteor.Error('invalid-room');
         const room = await Rooms.findOneById(roomId, { projection: { _id: 1 } });
-        if (!room) throw new Meteor.Error('invalid-room', 'Room not found');
-        if (!question?.trim()) throw new Meteor.Error('invalid-question', 'Question is required');
+        if (!room) throw new Meteor.Error('invalid-room');
+        if (!question?.trim()) throw new Meteor.Error('invalid-question');
         
         const cleanOptions = (options || []).map(o => o?.trim()).filter(Boolean);
-        if (cleanOptions.length < 2) throw new Meteor.Error('invalid-options', 'At least 2 options required');
+        if (cleanOptions.length < 2) throw new Meteor.Error('invalid-options');
 
         const creator = await Users.findOneById(userId, { projection: { name: 1, username: 1 } });
 
-        const pollId = `poll_${Date.now().toString(36)}`;
+        const pollId = `p${Date.now().toString(36)}${Math.random().toString(36).substr(2, 4)}`;
         
         const poll: Poll = {
             id: pollId,
@@ -246,34 +274,23 @@ Meteor.methods({
             isAnonymous: isAnonymous || false,
             isClosed: false,
             createdAt: new Date(),
-            scheduledAt: scheduledAt ? new Date(scheduledAt) : undefined,
             totalVoters: new Set()
         };
 
         polls.set(pollId, poll);
 
-        // Handle scheduled polls
-        if (poll.scheduledAt && poll.scheduledAt > new Date()) {
-            schedulePoll(poll);
-            return { 
-                success: true, 
-                pollId,
-                scheduled: true,
-                scheduledFor: poll.scheduledAt
-            };
-        }
-
         try {
             const sent = await executeSendMessage(userId, {
                 rid: roomId,
-                msg: buildPollMessage(poll, userId),
+                msg: '',
+                blocks: buildPollBlocks(poll, userId),
             });
             
             if (sent?._id) poll.messageId = sent._id;
             return { success: true, pollId };
         } catch (err: any) {
             polls.delete(pollId);
-            throw new Meteor.Error('create-failed', err?.reason || 'Failed to create poll');
+            throw new Meteor.Error('create-failed', err?.reason || 'Failed');
         }
     },
 
@@ -282,21 +299,16 @@ Meteor.methods({
         if (!userId) throw new Meteor.Error('not-authorized');
         
         const poll = polls.get(pollId);
-        if (!poll) throw new Meteor.Error('not-found', 'Poll not found. It may have expired.');
-        if (poll.isClosed) throw new Meteor.Error('closed', 'This poll is closed');
+        if (!poll) throw new Meteor.Error('not-found', 'Poll not found');
+        if (poll.isClosed) throw new Meteor.Error('closed', 'Poll is closed');
 
-        const normalizedOptionId = optionId.toUpperCase().trim();
-        const option = poll.options.find(o => o.id === normalizedOptionId);
-        if (!option) {
-            const validOptions = poll.options.map(o => o.id).join(', ');
-            throw new Meteor.Error('invalid', `Invalid option. Valid options: ${validOptions}`);
-        }
+        const option = poll.options.find(o => o.id === optionId.toUpperCase());
+        if (!option) throw new Meteor.Error('invalid', 'Invalid option');
 
         const wasSelected = option.voters.includes(userId);
         poll.totalVoters.add(userId);
         
         if (poll.allowMultiple) {
-            // Toggle vote for multiple choice
             if (wasSelected) {
                 option.votes = Math.max(0, option.votes - 1);
                 option.voters = option.voters.filter(v => v !== userId);
@@ -305,7 +317,6 @@ Meteor.methods({
                 option.voters.push(userId);
             }
         } else {
-            // Single choice - remove previous vote first
             poll.options.forEach(o => {
                 const idx = o.voters.indexOf(userId);
                 if (idx !== -1) {
@@ -314,28 +325,31 @@ Meteor.methods({
                 }
             });
             
-            // Add new vote (unless they clicked the same option to unvote)
             if (!wasSelected) {
                 option.votes++;
                 option.voters.push(userId);
             }
         }
 
-        // Update the poll message
-        await updatePollMessage(poll);
+        // Rebuild blocks
+        const blocks = buildPollBlocks(poll, userId);
+        
+        if (poll.messageId) {
+            await Messages.updateOne(
+                { _id: poll.messageId },
+                { $set: { blocks, _updatedAt: new Date() } }
+            );
+            await notifyOnMessageChange({ id: poll.messageId });
+        }
 
-        return { 
-            success: true, 
-            voted: !wasSelected,
-            option: option.text
-        };
+        return { success: true };
     },
 
     async 'poll.close'(pollId: string) {
         const userId = Meteor.userId();
         if (!userId) throw new Meteor.Error('not-authorized');
 
-        // Check admin permission
+        // ADMIN CHECK
         const userIsAdmin = await isAdmin(userId);
         if (!userIsAdmin) {
             throw new Meteor.Error('not-authorized', 'Only admins can close polls');
@@ -343,7 +357,7 @@ Meteor.methods({
 
         const poll = polls.get(pollId);
         if (!poll) throw new Meteor.Error('not-found', 'Poll not found');
-        if (poll.isClosed) throw new Meteor.Error('already-closed', 'Poll is already closed');
+        if (poll.isClosed) throw new Meteor.Error('already-closed', 'Poll already closed');
 
         // Close the poll
         poll.isClosed = true;
@@ -351,67 +365,47 @@ Meteor.methods({
         poll.closedBy = userId;
 
         // Update poll message
-        await updatePollMessage(poll);
+        const blocks = buildPollBlocks(poll);
+        if (poll.messageId) {
+            await Messages.updateOne(
+                { _id: poll.messageId },
+                { $set: { blocks, _updatedAt: new Date() } }
+            );
+            await notifyOnMessageChange({ id: poll.messageId });
+        }
 
-        return { success: true, message: 'Poll closed. Use /poll-export to view results.' };
-    },
-
-    async 'poll.export'(pollId: string) {
-        const userId = Meteor.userId();
-        if (!userId) throw new Meteor.Error('not-authorized');
-
-        const poll = polls.get(pollId);
-        if (!poll) throw new Meteor.Error('not-found', 'Poll not found');
-        if (!poll.isClosed) throw new Meteor.Error('not-closed', 'Close the poll first before exporting');
-
-        // Generate and send pie chart
-        const pieChart = generatePieChart(poll);
+        // Publish results as new message
+        const resultsMsg = generateResultsMessage(poll);
         await executeSendMessage(userId, {
             rid: poll.roomId,
-            msg: pieChart,
+            msg: resultsMsg,
         });
 
         return { success: true };
     },
 
-    async 'poll.list'() {
+    async 'poll.checkAdmin'() {
         const userId = Meteor.userId();
-        if (!userId) throw new Meteor.Error('not-authorized');
-
-        const userPolls: any[] = [];
-        polls.forEach((poll) => {
-            userPolls.push({
-                id: poll.id,
-                question: poll.question,
-                isClosed: poll.isClosed,
-                totalVotes: poll.options.reduce((sum, o) => sum + o.votes, 0),
-                createdAt: poll.createdAt
-            });
-        });
-
-        return userPolls;
+        if (!userId) return false;
+        return await isAdmin(userId);
     },
 
-    async 'poll.get'(pollId: string) {
+    async 'poll.refreshBlocks'(pollId: string) {
         const userId = Meteor.userId();
-        if (!userId) throw new Meteor.Error('not-authorized');
+        if (!userId) return { success: false };
 
         const poll = polls.get(pollId);
-        if (!poll) throw new Meteor.Error('not-found', 'Poll not found');
+        if (!poll || !poll.messageId) return { success: false };
 
-        return {
-            id: poll.id,
-            question: poll.question,
-            options: poll.options.map(o => ({
-                id: o.id,
-                text: o.text,
-                votes: o.votes,
-                isSelected: o.voters.includes(userId)
-            })),
-            isClosed: poll.isClosed,
-            allowMultiple: poll.allowMultiple,
-            isAnonymous: poll.isAnonymous
-        };
+        const blocks = buildPollBlocks(poll, userId);
+        
+        await Messages.updateOne(
+            { _id: poll.messageId },
+            { $set: { blocks, _updatedAt: new Date() } }
+        );
+        await notifyOnMessageChange({ id: poll.messageId });
+
+        return { success: true };
     }
 });
 
@@ -419,116 +413,29 @@ Meteor.methods({
 // Slash Commands
 // ============================================================================
 
-import { slashCommands } from '../../utils/server/slashCommand';
-
-// Vote command
 slashCommands.add({
     command: 'poll-vote',
-    callback: async function(_command: string, params: string, item: any) {
-        const userId = Meteor.userId();
-        if (!userId) return;
-
-        if (!params?.trim()) {
-            await executeSendMessage(userId, {
-                rid: item.rid,
-                msg: '❌ **Usage:** `/poll-vote <poll_id> <option>`\nExample: `/poll-vote poll_abc123 A`',
-            });
-            return;
-        }
-
+    callback: async function({ params, userId }) {
+        if (!params?.trim()) throw new Meteor.Error('usage', '/poll-vote <poll_id> <option>');
         const [pollId, optionId] = params.trim().split(/\s+/);
-        
-        if (!pollId || !optionId) {
-            await executeSendMessage(userId, {
-                rid: item.rid,
-                msg: '❌ **Usage:** `/poll-vote <poll_id> <option>`\nExample: `/poll-vote poll_abc123 A`',
-            });
-            return;
-        }
-
-        try {
-            const result = await Meteor.callAsync('poll.vote', pollId, optionId);
-            // Vote registered silently - poll updates in place
-        } catch (err: any) {
-            await executeSendMessage(userId, {
-                rid: item.rid,
-                msg: `❌ **Vote failed:** ${err?.reason || err?.message || 'Unknown error'}`,
-            });
-        }
+        return await Meteor.callAsync('poll.vote', pollId, optionId);
     },
-    options: {
-        description: 'Vote in a poll',
-        params: '<poll_id> <option>',
-        permission: 'send-message'
-    }
+    options: { description: 'Vote in a poll', params: '<poll_id> <option>' }
 });
 
-// Close command
 slashCommands.add({
     command: 'poll-close',
-    callback: async function(_command: string, params: string, item: any) {
-        const userId = Meteor.userId();
-        if (!userId) return;
-
-        const pollId = params?.trim();
-        if (!pollId) {
-            await executeSendMessage(userId, {
-                rid: item.rid,
-                msg: '❌ **Usage:** `/poll-close <poll_id>`',
-            });
-            return;
-        }
-
-        try {
-            await Meteor.callAsync('poll.close', pollId);
-            await executeSendMessage(userId, {
-                rid: item.rid,
-                msg: `✅ **Poll closed!** Use \`/poll-export ${pollId}\` to see the pie chart results.`,
-            });
-        } catch (err: any) {
-            await executeSendMessage(userId, {
-                rid: item.rid,
-                msg: `❌ **Close failed:** ${err?.reason || err?.message || 'Unknown error'}`,
-            });
-        }
+    callback: async function({ params, userId }) {
+        if (!params?.trim()) throw new Meteor.Error('usage', '/poll-close <poll_id>');
+        return await Meteor.callAsync('poll.close', params.trim());
     },
-    options: {
-        description: 'Close a poll (Admin only)',
-        params: '<poll_id>',
-        permission: 'send-message'
-    }
+    options: { description: 'Close poll (Admin only)', params: '<poll_id>' }
 });
 
-// Export command
 slashCommands.add({
-    command: 'poll-export',
-    callback: async function(_command: string, params: string, item: any) {
-        const userId = Meteor.userId();
-        if (!userId) return;
-
-        const pollId = params?.trim();
-        if (!pollId) {
-            await executeSendMessage(userId, {
-                rid: item.rid,
-                msg: '❌ **Usage:** `/poll-export <poll_id>`',
-            });
-            return;
-        }
-
-        try {
-            await Meteor.callAsync('poll.export', pollId);
-        } catch (err: any) {
-            await executeSendMessage(userId, {
-                rid: item.rid,
-                msg: `❌ **Export failed:** ${err?.reason || err?.message || 'Unknown error'}`,
-            });
-        }
+    command: 'poll',
+    callback: async function() {
+        throw new Meteor.Error('info', 'Click the 📊 button to create a poll');
     },
-    options: {
-        description: 'Export poll results as pie chart',
-        params: '<poll_id>',
-        permission: 'send-message'
-    }
+    options: { description: 'Create a poll', params: '' }
 });
-
-console.log('[Poll] System initialized');
