@@ -409,7 +409,7 @@ function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar'): { msg: stri
 // Schedule Poll - Persistent Implementation (survives server restart)
 // ============================================================================
 
-function saveScheduledPollToDb(poll: Poll) {
+async function saveScheduledPollToDb(poll: Poll): Promise<void> {
     if (!poll.scheduledAt) return;
     
     try {
@@ -427,8 +427,8 @@ function saveScheduledPollToDb(poll: Poll) {
             createdAt: poll.createdAt
         };
         
-        // Upsert to MongoDB
-        ScheduledPolls.upsert({ _id: poll.id }, { $set: doc });
+        // Upsert to MongoDB using async method
+        await ScheduledPolls.upsertAsync({ _id: poll.id }, { $set: doc });
         console.log('[Poll] 💾 Saved to MongoDB: ' + poll.id);
     } catch (err: any) {
         console.error('[Poll] ❌ Failed to save to MongoDB: ' + poll.id);
@@ -437,9 +437,9 @@ function saveScheduledPollToDb(poll: Poll) {
     }
 }
 
-function removeScheduledPollFromDb(pollId: string) {
+async function removeScheduledPollFromDb(pollId: string): Promise<void> {
     try {
-        ScheduledPolls.remove({ _id: pollId });
+        await ScheduledPolls.removeAsync({ _id: pollId });
         console.log('[Poll] 🗑️ Removed from MongoDB: ' + pollId);
     } catch (err: any) {
         console.error('[Poll] ⚠️ Failed to remove from MongoDB: ' + pollId);
@@ -471,11 +471,11 @@ function recreatePollFromDoc(doc: ScheduledPollDoc): Poll {
     };
 }
 
-function schedulePoll(poll: Poll) {
+async function schedulePoll(poll: Poll): Promise<void> {
     if (!poll.scheduledAt) return;
     
     // Save to MongoDB for persistence across restarts
-    saveScheduledPollToDb(poll);
+    await saveScheduledPollToDb(poll);
     
     // Clear any existing timer for this poll
     const existingTimer = scheduledTimers.get(poll.id);
@@ -508,23 +508,24 @@ function schedulePoll(poll: Poll) {
     
     console.log('[Poll] ⏱️ Setting timer for ' + poll.id + ' (' + Math.round(actualDelay / 1000) + 's)');
     
-    const timer = Meteor.setTimeout(() => {
-        console.log('[Poll] 🔔 Timer fired for: ' + poll.id);
-        scheduledTimers.delete(poll.id);
+    const pollId = poll.id; // Capture for closure
+    const timer = Meteor.setTimeout(async () => {
+        console.log('[Poll] 🔔 Timer fired for: ' + pollId);
+        scheduledTimers.delete(pollId);
         
         // Get poll from memory or recreate from DB
-        let currentPoll = polls.get(poll.id);
+        let currentPoll = polls.get(pollId);
         if (!currentPoll) {
             // Try to get from MongoDB
-            const doc = ScheduledPolls.findOne({ _id: poll.id });
+            const doc = await ScheduledPolls.findOneAsync({ _id: pollId });
             if (doc) {
                 currentPoll = recreatePollFromDoc(doc);
-                polls.set(poll.id, currentPoll);
+                polls.set(pollId, currentPoll);
             }
         }
         
         if (!currentPoll) {
-            console.log('[Poll] ❌ Poll not found anywhere: ' + poll.id);
+            console.log('[Poll] ❌ Poll not found anywhere: ' + pollId);
             return;
         }
         if (currentPoll.messageId) {
@@ -676,7 +677,7 @@ Meteor.methods({
                 console.log('[Poll]   - Scheduled for: ' + scheduledDate.toISOString());
                 console.log('[Poll]   - Room: ' + roomId);
                 
-                schedulePoll(poll);
+                await schedulePoll(poll);
                 
                 console.log('[Poll] ✅ Scheduled poll created successfully: ' + pollId);
 
@@ -848,73 +849,82 @@ Meteor.methods({
 // Startup: Load and re-schedule pending polls from MongoDB
 // ============================================================================
 
-function loadScheduledPollsFromDb() {
+async function loadScheduledPollsFromDb(): Promise<void> {
     const now = Date.now();
     let rescheduled = 0;
     let published = 0;
     
-    // Load all scheduled polls from MongoDB
-    const docs = ScheduledPolls.find({}).fetch();
-    console.log('[Poll] 📂 Found ' + docs.length + ' scheduled polls in MongoDB');
-    
-    docs.forEach((doc) => {
-        console.log('[Poll] 📋 Loading scheduled poll: ' + doc.pollId);
-        console.log('[Poll]   - Question: ' + doc.question);
-        console.log('[Poll]   - Scheduled for: ' + doc.scheduledAt.toISOString());
+    try {
+        // Load all scheduled polls from MongoDB using async
+        const docs = await ScheduledPolls.find({}).fetchAsync();
+        console.log('[Poll] 📂 Found ' + docs.length + ' scheduled polls in MongoDB');
         
-        // Recreate poll object
-        const poll = recreatePollFromDoc(doc);
-        
-        // Store in memory map
-        polls.set(poll.id, poll);
-        
-        // Check if time has passed
-        if (doc.scheduledAt.getTime() <= now) {
-            console.log('[Poll] ⏰ Time passed, publishing immediately: ' + doc.pollId);
-            void publishPollAsync(poll);
-            published++;
-        } else {
-            // Set up timer (don't save to DB again since it's already there)
-            const delay = doc.scheduledAt.getTime() - now;
-            const actualDelay = Math.min(delay, 2147483647);
+        for (const doc of docs) {
+            console.log('[Poll] 📋 Loading scheduled poll: ' + doc.pollId);
+            console.log('[Poll]   - Question: ' + doc.question);
+            console.log('[Poll]   - Scheduled for: ' + doc.scheduledAt.toISOString());
             
-            console.log('[Poll] ⏱️ Re-scheduling: ' + doc.pollId + ' in ' + Math.round(actualDelay / 1000) + 's');
+            // Recreate poll object
+            const poll = recreatePollFromDoc(doc);
             
-            const timer = Meteor.setTimeout(() => {
-                console.log('[Poll] 🔔 Timer fired (from startup): ' + poll.id);
-                scheduledTimers.delete(poll.id);
+            // Store in memory map
+            polls.set(poll.id, poll);
+            
+            // Check if time has passed
+            if (doc.scheduledAt.getTime() <= now) {
+                console.log('[Poll] ⏰ Time passed, publishing immediately: ' + doc.pollId);
+                void publishPollAsync(poll);
+                published++;
+            } else {
+                // Set up timer (don't save to DB again since it's already there)
+                const delay = doc.scheduledAt.getTime() - now;
+                const actualDelay = Math.min(delay, 2147483647);
                 
-                const currentPoll = polls.get(poll.id);
-                if (currentPoll && !currentPoll.messageId) {
-                    void publishPollAsync(currentPoll);
-                }
-            }, actualDelay);
-            
-            scheduledTimers.set(poll.id, timer);
-            rescheduled++;
+                console.log('[Poll] ⏱️ Re-scheduling: ' + doc.pollId + ' in ' + Math.round(actualDelay / 1000) + 's');
+                
+                const pollId = poll.id;
+                const timer = Meteor.setTimeout(() => {
+                    console.log('[Poll] 🔔 Timer fired (from startup): ' + pollId);
+                    scheduledTimers.delete(pollId);
+                    
+                    const currentPoll = polls.get(pollId);
+                    if (currentPoll && !currentPoll.messageId) {
+                        void publishPollAsync(currentPoll);
+                    }
+                }, actualDelay);
+                
+                scheduledTimers.set(poll.id, timer);
+                rescheduled++;
+            }
         }
-    });
-    
-    console.log('[Poll] ✅ Startup complete: ' + published + ' published, ' + rescheduled + ' rescheduled');
+        
+        console.log('[Poll] ✅ Startup complete: ' + published + ' published, ' + rescheduled + ' rescheduled');
+    } catch (err: any) {
+        console.error('[Poll] ❌ Failed to load scheduled polls:', err?.message || err);
+    }
 }
 
 // Periodic check for any missed polls (runs every 30 seconds)
-function periodicCheck() {
-    const now = Date.now();
-    const docs = ScheduledPolls.find({ scheduledAt: { $lte: new Date(now) } }).fetch();
-    
-    if (docs.length > 0) {
-        console.log('[Poll] 🔄 Periodic check found ' + docs.length + ' pending polls');
-        docs.forEach((doc) => {
-            let poll = polls.get(doc.pollId);
-            if (!poll) {
-                poll = recreatePollFromDoc(doc);
-                polls.set(poll.id, poll);
+async function periodicCheck(): Promise<void> {
+    try {
+        const now = Date.now();
+        const docs = await ScheduledPolls.find({ scheduledAt: { $lte: new Date(now) } }).fetchAsync();
+        
+        if (docs.length > 0) {
+            console.log('[Poll] 🔄 Periodic check found ' + docs.length + ' pending polls');
+            for (const doc of docs) {
+                let poll = polls.get(doc.pollId);
+                if (!poll) {
+                    poll = recreatePollFromDoc(doc);
+                    polls.set(poll.id, poll);
+                }
+                if (!poll.messageId) {
+                    void publishPollAsync(poll);
+                }
             }
-            if (!poll.messageId) {
-                void publishPollAsync(poll);
-            }
-        });
+        }
+    } catch (err: any) {
+        console.error('[Poll] ⚠️ Periodic check error:', err?.message || err);
     }
 }
 
@@ -924,12 +934,12 @@ Meteor.startup(() => {
     
     // Initial load after 3 seconds
     Meteor.setTimeout(() => {
-        loadScheduledPollsFromDb();
+        void loadScheduledPollsFromDb();
     }, 3000);
     
     // Periodic check every 30 seconds for any missed polls
     Meteor.setInterval(() => {
-        periodicCheck();
+        void periodicCheck();
     }, 30000);
 });
 
