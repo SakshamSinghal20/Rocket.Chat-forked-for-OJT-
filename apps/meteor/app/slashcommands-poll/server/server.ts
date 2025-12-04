@@ -1,5 +1,6 @@
 // Poll System - Complete Implementation
 import { Meteor } from 'meteor/meteor';
+import { Mongo } from 'meteor/mongo';
 import { Rooms, Messages, Users } from '@rocket.chat/models';
 import { executeSendMessage } from '../../lib/server/methods/sendMessage';
 import { notifyOnMessageChange } from '../../lib/server/lib/notifyListener';
@@ -32,8 +33,26 @@ interface Poll {
     totalVoters: Set<string>;
 }
 
+// MongoDB type for scheduled polls (serializable)
+interface ScheduledPollDoc {
+    _id: string;
+    pollId: string;
+    question: string;
+    options: { id: string; text: string }[];
+    creator: string;
+    creatorName: string;
+    roomId: string;
+    allowMultiple: boolean;
+    isAnonymous: boolean;
+    scheduledAt: Date;
+    createdAt: Date;
+}
+
 const polls = new Map<string, Poll>();
-const scheduledTimers = new Map<string, NodeJS.Timeout>();
+const scheduledTimers = new Map<string, ReturnType<typeof Meteor.setTimeout>>();
+
+// MongoDB collection for persisting scheduled polls
+const ScheduledPolls = new Mongo.Collection<ScheduledPollDoc>('rocketchat_scheduled_polls');
 
 // ============================================================================
 // Helpers
@@ -387,16 +406,69 @@ function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar'): { msg: stri
 }
 
 // ============================================================================
-// Schedule Poll - Robust Implementation
+// Schedule Poll - Persistent Implementation (survives server restart)
 // ============================================================================
+
+function saveScheduledPollToDb(poll: Poll) {
+    if (!poll.scheduledAt) return;
+    
+    const doc: ScheduledPollDoc = {
+        _id: poll.id,
+        pollId: poll.id,
+        question: poll.question,
+        options: poll.options.map(o => ({ id: o.id, text: o.text })),
+        creator: poll.creator,
+        creatorName: poll.creatorName || 'Unknown',
+        roomId: poll.roomId,
+        allowMultiple: poll.allowMultiple,
+        isAnonymous: poll.isAnonymous,
+        scheduledAt: poll.scheduledAt,
+        createdAt: poll.createdAt
+    };
+    
+    // Upsert to MongoDB
+    ScheduledPolls.upsert({ _id: poll.id }, { $set: doc });
+    console.log('[Poll] 💾 Saved to MongoDB: ' + poll.id);
+}
+
+function removeScheduledPollFromDb(pollId: string) {
+    ScheduledPolls.remove({ _id: pollId });
+    console.log('[Poll] 🗑️ Removed from MongoDB: ' + pollId);
+}
+
+function recreatePollFromDoc(doc: ScheduledPollDoc): Poll {
+    return {
+        id: doc.pollId,
+        question: doc.question,
+        options: doc.options.map(o => ({
+            id: o.id,
+            text: o.text,
+            votes: 0,
+            voters: [],
+            voterNames: []
+        })),
+        creator: doc.creator,
+        creatorName: doc.creatorName,
+        roomId: doc.roomId,
+        allowMultiple: doc.allowMultiple,
+        isAnonymous: doc.isAnonymous,
+        isClosed: false,
+        createdAt: doc.createdAt,
+        scheduledAt: doc.scheduledAt,
+        totalVoters: new Set()
+    };
+}
 
 function schedulePoll(poll: Poll) {
     if (!poll.scheduledAt) return;
     
+    // Save to MongoDB for persistence across restarts
+    saveScheduledPollToDb(poll);
+    
     // Clear any existing timer for this poll
     const existingTimer = scheduledTimers.get(poll.id);
     if (existingTimer) {
-        clearTimeout(existingTimer);
+        Meteor.clearTimeout(existingTimer);
         scheduledTimers.delete(poll.id);
     }
     
@@ -404,14 +476,16 @@ function schedulePoll(poll: Poll) {
     const scheduledTime = poll.scheduledAt.getTime();
     const delay = scheduledTime - now;
     
-    console.log('[Poll] Schedule info for ' + poll.id + ':');
+    console.log('[Poll] ⏰ Schedule info for ' + poll.id + ':');
+    console.log('[Poll]   - Question: ' + poll.question);
+    console.log('[Poll]   - Room: ' + poll.roomId);
     console.log('[Poll]   - Scheduled for: ' + poll.scheduledAt.toISOString());
     console.log('[Poll]   - Current time: ' + new Date(now).toISOString());
-    console.log('[Poll]   - Delay (ms): ' + delay);
+    console.log('[Poll]   - Delay: ' + Math.round(delay / 1000) + ' seconds');
     
     if (delay <= 0) {
         // Already past, publish immediately
-        console.log('[Poll] Scheduled time already passed, publishing now: ' + poll.id);
+        console.log('[Poll] ⚡ Scheduled time already passed, publishing now: ' + poll.id);
         void publishPollAsync(poll);
         return;
     }
@@ -420,20 +494,30 @@ function schedulePoll(poll: Poll) {
     const maxDelay = 2147483647;
     const actualDelay = Math.min(delay, maxDelay);
     
-    console.log('[Poll] Setting timer for ' + poll.id + ' in ' + Math.round(actualDelay / 1000) + ' seconds');
+    console.log('[Poll] ⏱️ Setting timer for ' + poll.id + ' (' + Math.round(actualDelay / 1000) + 's)');
     
     const timer = Meteor.setTimeout(() => {
-        console.log('[Poll] Timer fired for: ' + poll.id);
+        console.log('[Poll] 🔔 Timer fired for: ' + poll.id);
         scheduledTimers.delete(poll.id);
         
-        // Get fresh poll data
-        const currentPoll = polls.get(poll.id);
+        // Get poll from memory or recreate from DB
+        let currentPoll = polls.get(poll.id);
         if (!currentPoll) {
-            console.log('[Poll] Poll not found: ' + poll.id);
+            // Try to get from MongoDB
+            const doc = ScheduledPolls.findOne({ _id: poll.id });
+            if (doc) {
+                currentPoll = recreatePollFromDoc(doc);
+                polls.set(poll.id, currentPoll);
+            }
+        }
+        
+        if (!currentPoll) {
+            console.log('[Poll] ❌ Poll not found anywhere: ' + poll.id);
             return;
         }
         if (currentPoll.messageId) {
-            console.log('[Poll] Already published: ' + poll.id);
+            console.log('[Poll] ⚠️ Already published: ' + poll.id);
+            removeScheduledPollFromDb(poll.id);
             return;
         }
         
@@ -441,18 +525,19 @@ function schedulePoll(poll: Poll) {
     }, actualDelay);
     
     scheduledTimers.set(poll.id, timer);
-    console.log('[Poll] Timer set successfully for: ' + poll.id);
+    console.log('[Poll] ✅ Timer set successfully for: ' + poll.id);
 }
 
 async function publishPollAsync(poll: Poll): Promise<void> {
     // Prevent double-publishing
     if (poll.messageId) {
-        console.log('[Poll] Already published (double-check): ' + poll.id);
+        console.log('[Poll] ⚠️ Already published (double-check): ' + poll.id);
+        removeScheduledPollFromDb(poll.id);
         return;
     }
     
     try {
-        console.log('[Poll] Publishing poll now: ' + poll.id + ' to room: ' + poll.roomId);
+        console.log('[Poll] 📤 Publishing poll now: ' + poll.id + ' to room: ' + poll.roomId);
         
         const blocks = buildPollBlocks(poll, poll.creator);
         
@@ -465,6 +550,10 @@ async function publishPollAsync(poll: Poll): Promise<void> {
         if (sent?._id) {
             poll.messageId = sent._id;
             poll.scheduledAt = undefined;
+            
+            // Remove from MongoDB since it's now published
+            removeScheduledPollFromDb(poll.id);
+            
             console.log('[Poll] ✅ Successfully published: ' + poll.id + ' messageId: ' + sent._id);
         } else {
             console.error('[Poll] ❌ No message ID returned for: ' + poll.id);
@@ -690,49 +779,92 @@ Meteor.methods({
 });
 
 // ============================================================================
-// Startup: Re-schedule pending polls (handles server restart)
+// Startup: Load and re-schedule pending polls from MongoDB
 // ============================================================================
 
-function checkPendingScheduledPolls() {
+function loadScheduledPollsFromDb() {
     const now = Date.now();
     let rescheduled = 0;
     let published = 0;
     
-    console.log('[Poll] Checking ' + polls.size + ' polls for pending schedules...');
+    // Load all scheduled polls from MongoDB
+    const docs = ScheduledPolls.find({}).fetch();
+    console.log('[Poll] 📂 Found ' + docs.length + ' scheduled polls in MongoDB');
     
-    polls.forEach((poll) => {
-        // Only process polls that are scheduled but not yet published
-        if (poll.scheduledAt && !poll.messageId && !poll.isClosed) {
-            console.log('[Poll] Found pending scheduled poll: ' + poll.id);
-            if (poll.scheduledAt.getTime() <= now) {
-                // Time has passed, publish immediately
-                console.log('[Poll] Time passed, publishing: ' + poll.id);
-                void publishPollAsync(poll);
-                published++;
-            } else {
-                // Re-schedule for future
-                console.log('[Poll] Re-scheduling: ' + poll.id);
-                schedulePoll(poll);
-                rescheduled++;
-            }
+    docs.forEach((doc) => {
+        console.log('[Poll] 📋 Loading scheduled poll: ' + doc.pollId);
+        console.log('[Poll]   - Question: ' + doc.question);
+        console.log('[Poll]   - Scheduled for: ' + doc.scheduledAt.toISOString());
+        
+        // Recreate poll object
+        const poll = recreatePollFromDoc(doc);
+        
+        // Store in memory map
+        polls.set(poll.id, poll);
+        
+        // Check if time has passed
+        if (doc.scheduledAt.getTime() <= now) {
+            console.log('[Poll] ⏰ Time passed, publishing immediately: ' + doc.pollId);
+            void publishPollAsync(poll);
+            published++;
+        } else {
+            // Set up timer (don't save to DB again since it's already there)
+            const delay = doc.scheduledAt.getTime() - now;
+            const actualDelay = Math.min(delay, 2147483647);
+            
+            console.log('[Poll] ⏱️ Re-scheduling: ' + doc.pollId + ' in ' + Math.round(actualDelay / 1000) + 's');
+            
+            const timer = Meteor.setTimeout(() => {
+                console.log('[Poll] 🔔 Timer fired (from startup): ' + poll.id);
+                scheduledTimers.delete(poll.id);
+                
+                const currentPoll = polls.get(poll.id);
+                if (currentPoll && !currentPoll.messageId) {
+                    void publishPollAsync(currentPoll);
+                }
+            }, actualDelay);
+            
+            scheduledTimers.set(poll.id, timer);
+            rescheduled++;
         }
     });
     
-    if (rescheduled > 0 || published > 0) {
-        console.log('[Poll] Check complete: ' + published + ' published, ' + rescheduled + ' rescheduled');
+    console.log('[Poll] ✅ Startup complete: ' + published + ' published, ' + rescheduled + ' rescheduled');
+}
+
+// Periodic check for any missed polls (runs every 30 seconds)
+function periodicCheck() {
+    const now = Date.now();
+    const docs = ScheduledPolls.find({ scheduledAt: { $lte: new Date(now) } }).fetch();
+    
+    if (docs.length > 0) {
+        console.log('[Poll] 🔄 Periodic check found ' + docs.length + ' pending polls');
+        docs.forEach((doc) => {
+            let poll = polls.get(doc.pollId);
+            if (!poll) {
+                poll = recreatePollFromDoc(doc);
+                polls.set(poll.id, poll);
+            }
+            if (!poll.messageId) {
+                void publishPollAsync(poll);
+            }
+        });
     }
 }
 
-// Run startup check after a short delay to ensure Meteor is ready
+// Run startup after Meteor is ready
 Meteor.startup(() => {
-    Meteor.setTimeout(() => {
-        checkPendingScheduledPolls();
-    }, 5000); // 5 second delay
+    console.log('[Poll] 🚀 Starting poll system...');
     
-    // Also run periodic check every 60 seconds (catches edge cases)
+    // Initial load after 3 seconds
+    Meteor.setTimeout(() => {
+        loadScheduledPollsFromDb();
+    }, 3000);
+    
+    // Periodic check every 30 seconds for any missed polls
     Meteor.setInterval(() => {
-        checkPendingScheduledPolls();
-    }, 60000);
+        periodicCheck();
+    }, 30000);
 });
 
 console.log('[Poll] System initialized');
