@@ -313,27 +313,27 @@ function generateBarChartUrl(poll: Poll): string {
     const data = stats.options.map(o => o.votes);
     const percentages = stats.options.map(o => o.percentage);
     
-    // Clean horizontal bar chart with Rocket.Chat theme
+    // Wide horizontal bar chart - stretched layout
     const chartConfig = {
         type: 'horizontalBar',
         data: {
             labels: labels,
             datasets: [{
                 data: data,
-                backgroundColor: '#2563eb',
+                backgroundColor: 'rgba(37, 99, 235, 0.85)',
                 borderColor: '#1d4ed8',
-                borderWidth: 1,
-                barThickness: 24,
-                borderRadius: 3,
-                barPercentage: 0.8,
-                categoryPercentage: 0.9
+                borderWidth: 0,
+                barThickness: 32,
+                maxBarThickness: 40,
+                barPercentage: 0.7,
+                categoryPercentage: 0.8
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             layout: { 
-                padding: { left: 15, right: 50, top: 20, bottom: 20 } 
+                padding: { left: 20, right: 80, top: 25, bottom: 25 } 
             },
             plugins: {
                 legend: { display: false },
@@ -342,11 +342,11 @@ function generateBarChartUrl(poll: Poll): string {
                     color: '#ffffff',
                     anchor: 'end',
                     align: 'end',
-                    offset: 8,
-                    font: { weight: 'bold', size: 14 },
+                    offset: 10,
+                    font: { weight: 'bold', size: 15 },
                     formatter: function(value: number, ctx: any) {
                         const pct = percentages[ctx.dataIndex];
-                        return value + ' (' + pct + '%)';
+                        return value + ' votes (' + pct + '%)';
                     }
                 }
             },
@@ -356,22 +356,24 @@ function generateBarChartUrl(poll: Poll): string {
                         beginAtZero: true, 
                         display: true,
                         fontColor: '#9ca3af',
-                        fontSize: 11,
-                        stepSize: 1
+                        fontSize: 12,
+                        stepSize: 1,
+                        padding: 10
                     },
                     gridLines: { 
                         display: true, 
-                        color: '#374151',
-                        drawBorder: false
+                        color: 'rgba(75, 85, 99, 0.4)',
+                        drawBorder: false,
+                        zeroLineColor: 'rgba(75, 85, 99, 0.6)'
                     }
                 }],
                 yAxes: [{
                     gridLines: { display: false },
                     ticks: { 
-                        fontColor: '#e5e7eb', 
-                        fontSize: 14,
+                        fontColor: '#f3f4f6', 
+                        fontSize: 15,
                         fontStyle: 'bold',
-                        padding: 12
+                        padding: 20
                     }
                 }]
             }
@@ -379,9 +381,9 @@ function generateBarChartUrl(poll: Poll): string {
     };
     
     const chartJson = encodeURIComponent(JSON.stringify(chartConfig));
-    // Wider chart, dynamic height based on options
-    const height = Math.max(180, stats.options.length * 55 + 60);
-    return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%231f2937&width=650&height=' + height + '&devicePixelRatio=2';
+    // Much wider chart (900px), comfortable height per option
+    const height = Math.max(200, stats.options.length * 70 + 80);
+    return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%231f2937&width=900&height=' + height + '&devicePixelRatio=2';
 }
 
 function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar'): { msg: string; attachments: any[] } {
