@@ -1,7 +1,6 @@
 // Poll System - Rocket.Chat Native Theme with Admin Controls
 import { Meteor } from 'meteor/meteor';
 import { Rooms, Messages, Users } from '@rocket.chat/models';
-import { slashCommands } from '../../utils/server/slashCommand';
 import { executeSendMessage } from '../../lib/server/methods/sendMessage';
 import { notifyOnMessageChange } from '../../lib/server/lib/notifyListener';
 import { hasPermissionAsync } from '../../authorization/server/functions/hasPermission';
@@ -409,33 +408,4 @@ Meteor.methods({
     }
 });
 
-// ============================================================================
-// Slash Commands
-// ============================================================================
-
-slashCommands.add({
-    command: 'poll-vote',
-    callback: async function({ params, userId }) {
-        if (!params?.trim()) throw new Meteor.Error('usage', '/poll-vote <poll_id> <option>');
-        const [pollId, optionId] = params.trim().split(/\s+/);
-        return await Meteor.callAsync('poll.vote', pollId, optionId);
-    },
-    options: { description: 'Vote in a poll', params: '<poll_id> <option>' }
-});
-
-slashCommands.add({
-    command: 'poll-close',
-    callback: async function({ params, userId }) {
-        if (!params?.trim()) throw new Meteor.Error('usage', '/poll-close <poll_id>');
-        return await Meteor.callAsync('poll.close', params.trim());
-    },
-    options: { description: 'Close poll (Admin only)', params: '<poll_id>' }
-});
-
-slashCommands.add({
-    command: 'poll',
-    callback: async function() {
-        throw new Meteor.Error('info', 'Click the 📊 button to create a poll');
-    },
-    options: { description: 'Create a poll', params: '' }
-});
+// No slash commands - poll is accessed via the toolbar button

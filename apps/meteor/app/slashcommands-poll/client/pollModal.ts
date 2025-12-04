@@ -240,18 +240,22 @@ document.addEventListener('click', async (e) => {
     }
 }, true);
 
-// Export
+// Export - showPollModal is used by usePollAction hook
+export { showPollModal };
+
 export async function openPollModal(): Promise<void> {
     await showPollModal();
 }
 
 export const PollModal = {
     open: showPollModal,
-    openPollModal: showPollModal
+    openPollModal: showPollModal,
+    showPollModal: showPollModal
 };
 
 // Global access
 if (typeof window !== 'undefined') {
     (window as any).PollModal = PollModal;
     (window as any).openPollModal = showPollModal;
+    (window as any).showPollModal = showPollModal;
 }
