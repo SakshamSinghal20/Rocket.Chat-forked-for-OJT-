@@ -76,10 +76,8 @@ function buildPollMessage(poll: Poll): { msg: string; attachments: any[] } {
         const bar = generateProgressBar(opt.percentage);
         
         attachments.push({
-            color: ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#f97316'][i % 6],
             title: emoji + ' ' + opt.id + '. ' + opt.text,
-            text: bar + ' ' + opt.percentage + '% (' + opt.votes + ' votes)',
-            collapsed: false
+            text: bar + ' ' + opt.percentage + '% (' + opt.votes + ' votes)'
         });
     });
     
@@ -97,8 +95,7 @@ function buildPollMessage(poll: Poll): { msg: string; attachments: any[] } {
     }
     
     attachments.push({
-        text: footerText + instructions,
-        collapsed: false
+        text: footerText + instructions
     });
     
     return { msg, attachments };
