@@ -176,15 +176,23 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
             }]
         });
     } else {
-        // Show export button for closed polls
+        // Show export buttons for closed polls (pie and bar options)
         blocks.push({
             type: 'actions',
-            elements: [{
-                type: 'button',
-                text: { type: 'plain_text', text: '📊 Export Results', emoji: true },
-                value: 'pollexport_' + poll.id,
-                actionId: 'pollexport_' + poll.id
-            }]
+            elements: [
+                {
+                    type: 'button',
+                    text: { type: 'plain_text', text: '🥧 Pie Chart', emoji: true },
+                    value: 'pollexport_' + poll.id + '_pie',
+                    actionId: 'pollexport_' + poll.id + '_pie'
+                },
+                {
+                    type: 'button',
+                    text: { type: 'plain_text', text: '📊 Bar Graph', emoji: true },
+                    value: 'pollexport_' + poll.id + '_bar',
+                    actionId: 'pollexport_' + poll.id + '_bar'
+                }
+            ]
         });
         
         // Closed timestamp
@@ -278,13 +286,68 @@ function generatePieChartUrl(poll: Poll): string {
     return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%232f343d&width=500&height=500&devicePixelRatio=2';
 }
 
-function generatePieChartMessage(poll: Poll): { msg: string; attachments: any[] } {
+function generateBarChartUrl(poll: Poll): string {
+    const stats = calculateStats(poll);
+    const labels = stats.options.map(o => o.text);
+    const data = stats.options.map(o => o.votes);
+    const colors = ['#dc2626', '#2563eb', '#16a34a', '#ca8a04', '#9333ea', '#ea580c'];
+    const bgColors = stats.options.map((_, i) => colors[i % colors.length]);
+    
+    const chartConfig = {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Votes',
+                data: data,
+                backgroundColor: bgColors,
+                borderColor: bgColors,
+                borderWidth: 1
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            plugins: {
+                legend: { display: false },
+                datalabels: {
+                    display: true,
+                    color: '#ffffff',
+                    anchor: 'end',
+                    align: 'start',
+                    offset: 5,
+                    font: { weight: 'bold', size: 14 },
+                    formatter: function(value: number) {
+                        return value > 0 ? value : '';
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    grid: { color: '#404040' },
+                    ticks: { color: '#e4e7ea', font: { size: 12 } }
+                },
+                y: {
+                    grid: { display: false },
+                    ticks: { color: '#e4e7ea', font: { size: 14, weight: 'bold' } }
+                }
+            }
+        }
+    };
+    
+    const chartJson = encodeURIComponent(JSON.stringify(chartConfig));
+    return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%232f343d&width=600&height=400&devicePixelRatio=2';
+}
+
+function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar'): { msg: string; attachments: any[] } {
     const stats = calculateStats(poll);
     const emojis = ['🔴', '🔵', '🟢', '🟡', '🟣', '🟠'];
     const maxVotes = Math.max(...stats.options.map(o => o.votes));
     
-    // Generate pie chart image URL
-    const chartUrl = generatePieChartUrl(poll);
+    // Generate chart URL based on type
+    const chartUrl = chartType === 'bar' ? generateBarChartUrl(poll) : generatePieChartUrl(poll);
+    const chartTitle = chartType === 'bar' ? '📊 Bar Chart Results' : '📊 Pie Chart Results';
     
     // Build text summary
     let summary = '📊 **POLL RESULTS**\n\n';
@@ -308,7 +371,7 @@ function generatePieChartMessage(poll: Poll): { msg: string; attachments: any[] 
         msg: summary,
         attachments: [{
             image_url: chartUrl,
-            title: '📊 Pie Chart Results'
+            title: chartTitle
         }]
     };
 }
@@ -567,7 +630,7 @@ Meteor.methods({
         return { success: true };
     },
 
-    async 'poll.export'(pollId: string) {
+    async 'poll.export'(pollId: string, chartType?: 'pie' | 'bar') {
         const userId = Meteor.userId();
         if (!userId) throw new Meteor.Error('not-authorized');
 
@@ -575,8 +638,9 @@ Meteor.methods({
         if (!poll) throw new Meteor.Error('not-found', 'Poll not found');
         if (!poll.isClosed) throw new Meteor.Error('not-closed', 'Close the poll first');
 
-        // Generate and send pie chart with image
-        const { msg, attachments } = generatePieChartMessage(poll);
+        // Generate and send chart with image (default to pie)
+        const type = chartType === 'bar' ? 'bar' : 'pie';
+        const { msg, attachments } = generateChartMessage(poll, type);
         await executeSendMessage(userId, {
             rid: poll.roomId,
             msg,
