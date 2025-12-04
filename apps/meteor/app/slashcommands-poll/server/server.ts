@@ -320,7 +320,7 @@ function generateBarChartUrl(poll: Poll): string {
     const colors = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899'];
     const bgColors = stats.options.map((_, i) => colors[i % colors.length]);
     
-    // Vertical bar chart (bars go up from bottom)
+    // Vertical bar chart (bars go up from bottom) - NO legend
     const chartConfig = {
         type: 'bar',
         data: {
@@ -328,19 +328,21 @@ function generateBarChartUrl(poll: Poll): string {
             datasets: [{
                 data: data,
                 backgroundColor: bgColors,
-                borderColor: bgColors.map(c => c),
+                borderColor: bgColors,
                 borderWidth: 0,
-                borderRadius: 4
+                borderRadius: 4,
+                label: '' // Empty label to hide legend
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: true,
+            legend: { display: false }, // Chart.js 2.x format
             layout: { 
-                padding: { left: 20, right: 20, top: 30, bottom: 20 } 
+                padding: { left: 20, right: 20, top: 20, bottom: 20 } 
             },
             plugins: {
-                legend: { display: false },
+                legend: false, // Disable legend completely
                 datalabels: {
                     display: true,
                     color: '#ffffff',
