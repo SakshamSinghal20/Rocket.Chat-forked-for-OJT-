@@ -1,4 +1,4 @@
-// Poll System - Using Message Attachments
+// Poll System with UIKit Blocks
 import { Meteor } from 'meteor/meteor';
 import { Rooms, Messages, Users } from '@rocket.chat/models';
 import { executeSendMessage } from '../../lib/server/methods/sendMessage';
@@ -39,14 +39,15 @@ function generateProgressBar(percentage: number): string {
     return '▓'.repeat(filled) + '░'.repeat(width - filled);
 }
 
-function calculateStats(poll: Poll) {
+function calculateStats(poll: Poll, viewerId?: string) {
     const totalVotes = poll.options.reduce((sum, o) => sum + o.votes, 0);
     return {
         totalVotes,
         totalVoters: poll.totalVoters.size,
         options: poll.options.map(o => ({
             ...o,
-            percentage: totalVotes > 0 ? Math.round((o.votes / totalVotes) * 100) : 0
+            percentage: totalVotes > 0 ? Math.round((o.votes / totalVotes) * 100) : 0,
+            isSelected: viewerId ? o.voters.includes(viewerId) : false
         }))
     };
 }
@@ -59,64 +60,95 @@ async function isAdmin(userId: string): Promise<boolean> {
     }
 }
 
-// Build poll message with attachments
-function buildPollMessage(poll: Poll): { msg: string; attachments: any[] } {
-    const stats = calculateStats(poll);
-    const status = poll.isClosed ? ' [CLOSED]' : '';
+// Build UIKit blocks
+function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
+    const stats = calculateStats(poll, viewerId);
+    const blocks: any[] = [];
     
-    // Main message text
-    let msg = '📊 **' + poll.question + '**' + status;
+    // Header
+    blocks.push({
+        type: 'section',
+        text: {
+            type: 'mrkdwn',
+            text: '📊 *' + poll.question + '*' + (poll.isClosed ? ' [CLOSED 🔒]' : '')
+        }
+    });
     
-    // Build attachments for options
-    const attachments: any[] = [];
-    const emojis = ['🔴', '🔵', '🟢', '🟡', '🟣', '🟠'];
+    // Info line
+    blocks.push({
+        type: 'context',
+        elements: [{
+            type: 'mrkdwn',
+            text: (poll.isAnonymous ? '🔒 Anonymous' : '👁 Public') + ' • ' + (poll.allowMultiple ? '☑️ Multiple' : '⭕ Single') + ' • ID: ' + poll.id
+        }]
+    });
     
+    // Options with vote buttons
+    const emojis = ['🔴', '🔵', '🟢', '🟡', '🟣'];
     stats.options.forEach((opt, i) => {
-        const emoji = emojis[i % emojis.length];
+        const emoji = emojis[i % 5];
         const bar = generateProgressBar(opt.percentage);
+        const selected = opt.isSelected ? ' ✓' : '';
         
-        attachments.push({
-            title: emoji + ' ' + opt.id + '. ' + opt.text,
-            text: bar + ' ' + opt.percentage + '% (' + opt.votes + ' votes)'
-        });
+        if (poll.isClosed) {
+            // Closed poll - no buttons
+            blocks.push({
+                type: 'section',
+                text: {
+                    type: 'mrkdwn',
+                    text: emoji + ' *' + opt.text + '*\n' + bar + ' ' + opt.percentage + '% (' + opt.votes + ')'
+                }
+            });
+        } else {
+            // Open poll - with vote button
+            blocks.push({
+                type: 'section',
+                text: {
+                    type: 'mrkdwn',
+                    text: emoji + ' *' + opt.text + '*' + selected + '\n' + bar + ' ' + opt.percentage + '% (' + opt.votes + ')'
+                },
+                accessory: {
+                    type: 'button',
+                    text: {
+                        type: 'plain_text',
+                        text: opt.isSelected ? '✓' : 'Vote',
+                        emoji: true
+                    },
+                    value: 'pollvote_' + poll.id + '_' + opt.id,
+                    actionId: 'pollvote_' + poll.id + '_' + opt.id
+                }
+            });
+        }
     });
     
-    // Footer attachment with stats
-    const footerText = '📈 ' + stats.totalVotes + ' votes • 👥 ' + stats.totalVoters + ' voters\n' +
-        (poll.isAnonymous ? '🔒 Anonymous' : '👁 Public') + ' • ' +
-        (poll.allowMultiple ? '☑️ Multiple' : '⭕ Single') + '\n' +
-        '🆔 Poll ID: ' + poll.id;
+    // Stats
+    blocks.push({
+        type: 'context',
+        elements: [{
+            type: 'mrkdwn',
+            text: '📈 ' + stats.totalVotes + ' votes • 👥 ' + stats.totalVoters + ' voters • by ' + (poll.creatorName || 'Unknown')
+        }]
+    });
     
-    let instructions = '';
+    // Close button for open polls
     if (!poll.isClosed) {
-        instructions = '\n\n**Vote:** `/vote ' + poll.id + ' A` (or B, C...)\n**Close:** `/closepoll ' + poll.id + '` (admin)';
-    } else {
-        instructions = '\n\n🔒 Poll closed on ' + (poll.closedAt ? poll.closedAt.toLocaleString() : 'unknown');
+        blocks.push({
+            type: 'actions',
+            elements: [{
+                type: 'button',
+                text: {
+                    type: 'plain_text',
+                    text: '🔒 Close Poll',
+                    emoji: true
+                },
+                value: 'pollclose_' + poll.id,
+                actionId: 'pollclose_' + poll.id,
+                style: 'danger'
+            }]
+        });
     }
     
-    attachments.push({
-        text: footerText + instructions
-    });
-    
-    return { msg, attachments };
-}
-
-// Update poll message
-async function updatePollMessage(poll: Poll): Promise<boolean> {
-    if (!poll.messageId) return false;
-    
-    try {
-        const { msg, attachments } = buildPollMessage(poll);
-        await Messages.updateOne(
-            { _id: poll.messageId },
-            { $set: { msg, attachments, _updatedAt: new Date() } }
-        );
-        await notifyOnMessageChange({ id: poll.messageId });
-        return true;
-    } catch (err) {
-        console.error('[Poll] Update failed:', err);
-        return false;
-    }
+    return blocks;
 }
 
 // Meteor Methods
@@ -133,16 +165,15 @@ Meteor.methods({
 
         const { roomId, question, options, allowMultiple, isAnonymous } = data;
         
-        if (!roomId) throw new Meteor.Error('invalid-room', 'Room required');
+        if (!roomId) throw new Meteor.Error('invalid-room');
         const room = await Rooms.findOneById(roomId, { projection: { _id: 1 } });
-        if (!room) throw new Meteor.Error('invalid-room', 'Room not found');
-        if (!question?.trim()) throw new Meteor.Error('invalid-question', 'Question required');
+        if (!room) throw new Meteor.Error('invalid-room');
+        if (!question?.trim()) throw new Meteor.Error('invalid-question');
         
         const cleanOptions = (options || []).map(o => o?.trim()).filter(Boolean);
-        if (cleanOptions.length < 2) throw new Meteor.Error('invalid-options', 'Need 2+ options');
+        if (cleanOptions.length < 2) throw new Meteor.Error('invalid-options');
 
         const creator = await Users.findOneById(userId, { projection: { name: 1, username: 1 } });
-
         const pollId = 'poll' + Date.now().toString(36);
         
         const poll: Poll = {
@@ -167,11 +198,10 @@ Meteor.methods({
         polls.set(pollId, poll);
 
         try {
-            const { msg, attachments } = buildPollMessage(poll);
             const sent = await executeSendMessage(userId, {
                 rid: roomId,
-                msg,
-                attachments
+                msg: '',
+                blocks: buildPollBlocks(poll, userId)
             });
             
             if (sent?._id) poll.messageId = sent._id;
@@ -190,9 +220,8 @@ Meteor.methods({
         if (!poll) throw new Meteor.Error('not-found', 'Poll not found');
         if (poll.isClosed) throw new Meteor.Error('closed', 'Poll is closed');
 
-        const normalizedId = optionId.toUpperCase().trim();
-        const option = poll.options.find(o => o.id === normalizedId);
-        if (!option) throw new Meteor.Error('invalid', 'Invalid option. Use A, B, C...');
+        const option = poll.options.find(o => o.id === optionId.toUpperCase());
+        if (!option) throw new Meteor.Error('invalid', 'Invalid option');
 
         const wasSelected = option.voters.includes(userId);
         poll.totalVoters.add(userId);
@@ -213,14 +242,22 @@ Meteor.methods({
                     o.voters.splice(idx, 1);
                 }
             });
-            
             if (!wasSelected) {
                 option.votes++;
                 option.voters.push(userId);
             }
         }
 
-        await updatePollMessage(poll);
+        // Update message
+        if (poll.messageId) {
+            const blocks = buildPollBlocks(poll, userId);
+            await Messages.updateOne(
+                { _id: poll.messageId },
+                { $set: { blocks, _updatedAt: new Date() } }
+            );
+            await notifyOnMessageChange({ id: poll.messageId });
+        }
+
         return { success: true, option: option.text };
     },
 
@@ -241,79 +278,15 @@ Meteor.methods({
         poll.closedAt = new Date();
         poll.closedBy = userId;
 
-        await updatePollMessage(poll);
+        if (poll.messageId) {
+            const blocks = buildPollBlocks(poll);
+            await Messages.updateOne(
+                { _id: poll.messageId },
+                { $set: { blocks, _updatedAt: new Date() } }
+            );
+            await notifyOnMessageChange({ id: poll.messageId });
+        }
+
         return { success: true };
     }
 });
-
-// Slash Commands
-import { slashCommands } from '../../utils/server/slashCommand';
-
-slashCommands.add({
-    command: 'vote',
-    callback: async (_command: string, params: string, item: any) => {
-        const userId = Meteor.userId();
-        if (!userId) return;
-
-        const parts = (params || '').trim().split(/\s+/);
-        if (parts.length < 2) {
-            await executeSendMessage(userId, {
-                rid: item.rid,
-                msg: '❌ **Usage:** `/vote <poll_id> <option>`\nExample: `/vote pollm4abc A`'
-            });
-            return;
-        }
-
-        try {
-            // @ts-ignore
-            const result = await Meteor.callAsync('poll.vote', parts[0], parts[1]);
-            // Silent success - poll updates in place
-        } catch (err: any) {
-            await executeSendMessage(userId, {
-                rid: item.rid,
-                msg: '❌ ' + (err?.reason || 'Vote failed')
-            });
-        }
-    },
-    options: {
-        description: 'Vote in a poll: /vote pollId A',
-        params: '<poll_id> <option>'
-    }
-});
-
-slashCommands.add({
-    command: 'closepoll',
-    callback: async (_command: string, params: string, item: any) => {
-        const userId = Meteor.userId();
-        if (!userId) return;
-
-        const pollId = (params || '').trim();
-        if (!pollId) {
-            await executeSendMessage(userId, {
-                rid: item.rid,
-                msg: '❌ **Usage:** `/closepoll <poll_id>`'
-            });
-            return;
-        }
-
-        try {
-            // @ts-ignore
-            await Meteor.callAsync('poll.close', pollId);
-            await executeSendMessage(userId, {
-                rid: item.rid,
-                msg: '✅ Poll closed!'
-            });
-        } catch (err: any) {
-            await executeSendMessage(userId, {
-                rid: item.rid,
-                msg: '❌ ' + (err?.reason || 'Failed')
-            });
-        }
-    },
-    options: {
-        description: 'Close a poll (admin only)',
-        params: '<poll_id>'
-    }
-});
-
-console.log('[Poll] System loaded');
