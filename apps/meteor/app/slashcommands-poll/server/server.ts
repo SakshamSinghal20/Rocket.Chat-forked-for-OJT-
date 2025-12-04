@@ -652,14 +652,26 @@ Meteor.methods({
         const creator = await Users.findOneById(userId, { projection: { name: 1, username: 1 } });
         const pollId = 'poll' + Date.now().toString(36);
         
-        // Parse scheduled time
+        // Parse scheduled time (datetime-local format: "2024-12-04T09:03")
+        // The input is in user's local timezone, so we need to parse it correctly
         let scheduledDate: Date | undefined;
         if (scheduledAt) {
             console.log('[Poll] Parsing scheduledAt:', scheduledAt);
+            
+            // datetime-local format doesn't include timezone
+            // Parse as local time by creating date directly from the string
+            // The string format "2024-12-04T09:03" is already local time
             scheduledDate = new Date(scheduledAt);
-            console.log('[Poll] Parsed date:', scheduledDate.toISOString());
-            console.log('[Poll] Current time:', new Date().toISOString());
-            console.log('[Poll] Is valid date:', !isNaN(scheduledDate.getTime()));
+            
+            // If the date seems wrong (timezone issue), the input might be treated as UTC
+            // In that case, we need to NOT convert - the Date constructor with ISO-like 
+            // format without Z treats it as local time in modern browsers/Node
+            
+            console.log('[Poll] Input string:', scheduledAt);
+            console.log('[Poll] Parsed as:', scheduledDate.toString());
+            console.log('[Poll] In ISO:', scheduledDate.toISOString());
+            console.log('[Poll] Current time:', new Date().toString());
+            console.log('[Poll] Is valid:', !isNaN(scheduledDate.getTime()));
             console.log('[Poll] Is in future:', scheduledDate > new Date());
             
             if (isNaN(scheduledDate.getTime())) {
@@ -669,7 +681,8 @@ Meteor.methods({
                 console.log('[Poll] ⚠️ Date is in past or now, publishing immediately');
                 scheduledDate = undefined;
             } else {
-                console.log('[Poll] ✅ Valid future date, will schedule');
+                const delayMs = scheduledDate.getTime() - Date.now();
+                console.log('[Poll] ✅ Valid future date, will schedule in ' + Math.round(delayMs / 1000) + ' seconds');
             }
         }
         

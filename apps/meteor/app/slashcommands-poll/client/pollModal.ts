@@ -382,7 +382,21 @@ export function showPollModal() {
         const allowMultiple = (document.getElementById('poll-multiple') as HTMLInputElement).checked;
         const isAnonymous = (document.getElementById('poll-anonymous') as HTMLInputElement).checked;
         const scheduleEnabled = (document.getElementById('poll-schedule-toggle') as HTMLInputElement).checked;
-        const scheduledAt = scheduleEnabled ? (document.getElementById('poll-schedule-time') as HTMLInputElement).value : null;
+        
+        // Get scheduled time and convert to ISO string with timezone
+        let scheduledAt: string | null = null;
+        if (scheduleEnabled) {
+            const inputValue = (document.getElementById('poll-schedule-time') as HTMLInputElement).value;
+            if (inputValue) {
+                // datetime-local gives "2024-12-04T09:03" in local time
+                // Convert to proper ISO string that preserves the intended local time
+                const localDate = new Date(inputValue);
+                scheduledAt = localDate.toISOString();
+                console.log('[Poll] Schedule input:', inputValue);
+                console.log('[Poll] As local Date:', localDate.toString());
+                console.log('[Poll] As ISO:', scheduledAt);
+            }
+        }
         
         if (!question) {
             showToast('Enter a question', 'error');
