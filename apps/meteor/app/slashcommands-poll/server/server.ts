@@ -195,24 +195,12 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
             style: 'danger'
         });
     } else {
-        // Export buttons for closed polls - show all 3 options
+        // Single export button for closed polls - exports both charts
         actionElements.push({
             type: 'button',
-            text: { type: 'plain_text', text: '📊 Both Charts', emoji: true },
+            text: { type: 'plain_text', text: '📊 Export Charts', emoji: true },
             value: 'pollexport_' + poll.id + '_both',
             actionId: 'pollexport_' + poll.id + '_both'
-        });
-        actionElements.push({
-            type: 'button',
-            text: { type: 'plain_text', text: '🥧 Pie Only', emoji: true },
-            value: 'pollexport_' + poll.id + '_pie',
-            actionId: 'pollexport_' + poll.id + '_pie'
-        });
-        actionElements.push({
-            type: 'button',
-            text: { type: 'plain_text', text: '📊 Bar Only', emoji: true },
-            value: 'pollexport_' + poll.id + '_bar',
-            actionId: 'pollexport_' + poll.id + '_bar'
         });
     }
     
