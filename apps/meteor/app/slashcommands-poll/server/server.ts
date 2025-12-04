@@ -103,7 +103,7 @@ function generateResultsMessage(poll: Poll): string {
 // Block Builder - Native Rocket.Chat Style
 // ============================================================================
 
-function buildPollBlocks(poll: Poll, viewerId?: string, showAdminControls: boolean = false): any[] {
+function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
     const stats = calculateStats(poll, viewerId);
     const blocks: any[] = [];
     
@@ -171,8 +171,8 @@ function buildPollBlocks(poll: Poll, viewerId?: string, showAdminControls: boole
         }]
     });
     
-    // ADMIN CONTROLS - Close button (only for admins and open polls)
-    if (showAdminControls && !poll.isClosed) {
+    // CLOSE BUTTON - Always shown for open polls (permission checked on click)
+    if (!poll.isClosed) {
         blocks.push({
             type: 'actions',
             blockId: `admin_${poll.id}`,
@@ -180,7 +180,7 @@ function buildPollBlocks(poll: Poll, viewerId?: string, showAdminControls: boole
                 type: 'button',
                 text: {
                     type: 'plain_text',
-                    text: '🔒 Close Poll & Publish Results',
+                    text: '🔒 Close Poll (Admin)',
                     emoji: true
                 },
                 value: poll.id,
@@ -209,13 +209,11 @@ function buildPollBlocks(poll: Poll, viewerId?: string, showAdminControls: boole
 // Update Poll Message
 // ============================================================================
 
-async function updatePollMessage(poll: Poll, forUserId?: string): Promise<boolean> {
+async function updatePollMessage(poll: Poll): Promise<boolean> {
     if (!poll.messageId) return false;
     
     try {
-        // Check if the user requesting is admin
-        const showAdmin = forUserId ? await isAdmin(forUserId) : false;
-        const blocks = buildPollBlocks(poll, undefined, showAdmin);
+        const blocks = buildPollBlocks(poll);
         
         await Messages.updateOne(
             { _id: poll.messageId },
@@ -257,7 +255,6 @@ Meteor.methods({
         if (cleanOptions.length < 2) throw new Meteor.Error('invalid-options');
 
         const creator = await Users.findOneById(userId, { projection: { name: 1, username: 1 } });
-        const userIsAdmin = await isAdmin(userId);
 
         const pollId = `p${Date.now().toString(36)}${Math.random().toString(36).substr(2, 4)}`;
         
@@ -286,7 +283,7 @@ Meteor.methods({
             const sent = await executeSendMessage(userId, {
                 rid: roomId,
                 msg: '',
-                blocks: buildPollBlocks(poll, userId, userIsAdmin),
+                blocks: buildPollBlocks(poll, userId),
             });
             
             if (sent?._id) poll.messageId = sent._id;
@@ -334,9 +331,8 @@ Meteor.methods({
             }
         }
 
-        // Rebuild blocks with admin check
-        const userIsAdmin = await isAdmin(userId);
-        const blocks = buildPollBlocks(poll, userId, userIsAdmin);
+        // Rebuild blocks
+        const blocks = buildPollBlocks(poll, userId);
         
         if (poll.messageId) {
             await Messages.updateOne(
@@ -369,7 +365,7 @@ Meteor.methods({
         poll.closedBy = userId;
 
         // Update poll message
-        const blocks = buildPollBlocks(poll, undefined, false);
+        const blocks = buildPollBlocks(poll);
         if (poll.messageId) {
             await Messages.updateOne(
                 { _id: poll.messageId },
@@ -401,8 +397,7 @@ Meteor.methods({
         const poll = polls.get(pollId);
         if (!poll || !poll.messageId) return { success: false };
 
-        const userIsAdmin = await isAdmin(userId);
-        const blocks = buildPollBlocks(poll, userId, userIsAdmin);
+        const blocks = buildPollBlocks(poll, userId);
         
         await Messages.updateOne(
             { _id: poll.messageId },
