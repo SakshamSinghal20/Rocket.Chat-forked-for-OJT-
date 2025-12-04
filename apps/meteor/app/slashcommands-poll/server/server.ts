@@ -655,9 +655,21 @@ Meteor.methods({
         // Parse scheduled time
         let scheduledDate: Date | undefined;
         if (scheduledAt) {
+            console.log('[Poll] Parsing scheduledAt:', scheduledAt);
             scheduledDate = new Date(scheduledAt);
-            if (isNaN(scheduledDate.getTime()) || scheduledDate <= new Date()) {
-                scheduledDate = undefined; // Invalid or past date, publish immediately
+            console.log('[Poll] Parsed date:', scheduledDate.toISOString());
+            console.log('[Poll] Current time:', new Date().toISOString());
+            console.log('[Poll] Is valid date:', !isNaN(scheduledDate.getTime()));
+            console.log('[Poll] Is in future:', scheduledDate > new Date());
+            
+            if (isNaN(scheduledDate.getTime())) {
+                console.log('[Poll] ⚠️ Invalid date format, publishing immediately');
+                scheduledDate = undefined;
+            } else if (scheduledDate <= new Date()) {
+                console.log('[Poll] ⚠️ Date is in past or now, publishing immediately');
+                scheduledDate = undefined;
+            } else {
+                console.log('[Poll] ✅ Valid future date, will schedule');
             }
         }
         
@@ -682,7 +694,7 @@ Meteor.methods({
             totalVoters: new Set()
         };
 
-        polls.set(pollId, poll);
+            polls.set(pollId, poll);
 
         // Handle scheduled polls
         if (scheduledDate) {
@@ -881,7 +893,7 @@ Meteor.methods({
         
         // Don't reveal voters for anonymous polls
         if (poll.isAnonymous) {
-            return {
+        return { 
                 question: poll.question,
                 isAnonymous: true,
                 options: poll.options.map(o => ({
@@ -964,22 +976,26 @@ async function loadScheduledPollsFromDb(): Promise<void> {
     }
 }
 
-// Periodic check for any missed polls (runs every 30 seconds)
+// Periodic check for any missed polls (runs every 15 seconds)
 async function periodicCheck(): Promise<void> {
     try {
         const now = Date.now();
+        
+        // Find all scheduled polls that should have been published by now
         const docs = await ScheduledPolls.find({ scheduledAt: { $lte: new Date(now) } }).fetchAsync();
         
         if (docs.length > 0) {
-            console.log('[Poll] 🔄 Periodic check found ' + docs.length + ' pending polls');
+            console.log('[Poll] 🔄 Periodic check found ' + docs.length + ' due polls at ' + new Date().toISOString());
             for (const doc of docs) {
+                console.log('[Poll]   - Publishing: ' + doc.pollId + ' (was scheduled for ' + doc.scheduledAt.toISOString() + ')');
+                
                 let poll = polls.get(doc.pollId);
                 if (!poll) {
                     poll = recreatePollFromDoc(doc);
                     polls.set(poll.id, poll);
                 }
                 if (!poll.messageId) {
-                    void publishPollAsync(poll);
+                    await publishPollAsync(poll);
                 }
             }
         }
@@ -991,16 +1007,21 @@ async function periodicCheck(): Promise<void> {
 // Run startup after Meteor is ready
 Meteor.startup(() => {
     console.log('[Poll] 🚀 Starting poll system...');
+    console.log('[Poll] MongoDB collection: rocketchat_scheduled_polls');
     
     // Initial load after 3 seconds
     Meteor.setTimeout(() => {
+        console.log('[Poll] 📂 Running initial scheduled poll check...');
         void loadScheduledPollsFromDb();
     }, 3000);
     
-    // Periodic check every 30 seconds for any missed polls
+    // Periodic check every 15 seconds for any missed polls
     Meteor.setInterval(() => {
         void periodicCheck();
-    }, 30000);
+    }, 15000);
 });
+
+// Log that system is ready
+console.log('[Poll] ✅ Poll scheduling system ready');
 
 console.log('[Poll] System initialized');
