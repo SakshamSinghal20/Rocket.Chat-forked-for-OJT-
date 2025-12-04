@@ -182,16 +182,18 @@ function setupButtonInterceptor() {
             return;
         }
         
-        // Handle export (pollexport_POLLID_pie or pollexport_POLLID_bar)
+        // Handle export (pollexport_POLLID_pie or pollexport_POLLID_bar or pollexport_POLLID_both)
         if (actionValue.startsWith('pollexport_')) {
             const parts = actionValue.replace('pollexport_', '').split('_');
             const pollId = parts[0];
-            const chartType = parts[1] === 'bar' ? 'bar' : 'pie';
+            const chartType = parts[1] === 'bar' ? 'bar' : (parts[1] === 'both' ? 'both' : 'pie');
             
             try {
                 // @ts-ignore
                 await Meteor.callAsync('poll.export', pollId, chartType);
-                showToast(chartType === 'bar' ? 'Bar graph exported!' : 'Pie chart exported!', 'success');
+                const msg = chartType === 'both' ? 'Both charts exported!' : 
+                           (chartType === 'bar' ? 'Bar chart exported!' : 'Pie chart exported!');
+                showToast(msg, 'success');
             } catch (err: any) {
                 showToast(err?.reason || 'Export failed', 'error');
             }

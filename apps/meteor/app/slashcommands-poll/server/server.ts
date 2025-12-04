@@ -195,16 +195,22 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
             style: 'danger'
         });
     } else {
-        // Export buttons for closed polls
+        // Export buttons for closed polls - show all 3 options
         actionElements.push({
             type: 'button',
-            text: { type: 'plain_text', text: '🥧 Pie Chart', emoji: true },
+            text: { type: 'plain_text', text: '📊 Both Charts', emoji: true },
+            value: 'pollexport_' + poll.id + '_both',
+            actionId: 'pollexport_' + poll.id + '_both'
+        });
+        actionElements.push({
+            type: 'button',
+            text: { type: 'plain_text', text: '🥧 Pie Only', emoji: true },
             value: 'pollexport_' + poll.id + '_pie',
             actionId: 'pollexport_' + poll.id + '_pie'
         });
         actionElements.push({
             type: 'button',
-            text: { type: 'plain_text', text: '📊 Bar Graph', emoji: true },
+            text: { type: 'plain_text', text: '📊 Bar Only', emoji: true },
             value: 'pollexport_' + poll.id + '_bar',
             actionId: 'pollexport_' + poll.id + '_bar'
         });
@@ -311,29 +317,27 @@ function generateBarChartUrl(poll: Poll): string {
     const stats = calculateStats(poll);
     const labels = stats.options.map(o => o.text);
     const data = stats.options.map(o => o.votes);
-    const percentages = stats.options.map(o => o.percentage);
+    const colors = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899'];
+    const bgColors = stats.options.map((_, i) => colors[i % colors.length]);
     
-    // Wide horizontal bar chart - stretched layout
+    // Vertical bar chart (bars go up from bottom)
     const chartConfig = {
-        type: 'horizontalBar',
+        type: 'bar',
         data: {
             labels: labels,
             datasets: [{
                 data: data,
-                backgroundColor: 'rgba(37, 99, 235, 0.85)',
-                borderColor: '#1d4ed8',
+                backgroundColor: bgColors,
+                borderColor: bgColors.map(c => c),
                 borderWidth: 0,
-                barThickness: 32,
-                maxBarThickness: 40,
-                barPercentage: 0.7,
-                categoryPercentage: 0.8
+                borderRadius: 4
             }]
         },
         options: {
             responsive: true,
-            maintainAspectRatio: false,
+            maintainAspectRatio: true,
             layout: { 
-                padding: { left: 20, right: 80, top: 25, bottom: 25 } 
+                padding: { left: 20, right: 20, top: 30, bottom: 20 } 
             },
             plugins: {
                 legend: { display: false },
@@ -341,39 +345,34 @@ function generateBarChartUrl(poll: Poll): string {
                     display: true,
                     color: '#ffffff',
                     anchor: 'end',
-                    align: 'end',
-                    offset: 10,
-                    font: { weight: 'bold', size: 15 },
-                    formatter: function(value: number, ctx: any) {
-                        const pct = percentages[ctx.dataIndex];
-                        return value + ' votes (' + pct + '%)';
+                    align: 'top',
+                    offset: 4,
+                    font: { weight: 'bold', size: 14 },
+                    formatter: function(value: number) {
+                        return value;
                     }
                 }
             },
             scales: {
                 xAxes: [{
+                    gridLines: { display: false },
                     ticks: { 
-                        beginAtZero: true, 
-                        display: true,
-                        fontColor: '#9ca3af',
-                        fontSize: 12,
-                        stepSize: 1,
-                        padding: 10
-                    },
-                    gridLines: { 
-                        display: true, 
-                        color: 'rgba(75, 85, 99, 0.4)',
-                        drawBorder: false,
-                        zeroLineColor: 'rgba(75, 85, 99, 0.6)'
+                        fontColor: '#e5e7eb', 
+                        fontSize: 13,
+                        fontStyle: 'bold'
                     }
                 }],
                 yAxes: [{
-                    gridLines: { display: false },
                     ticks: { 
-                        fontColor: '#f3f4f6', 
-                        fontSize: 15,
-                        fontStyle: 'bold',
-                        padding: 20
+                        beginAtZero: true,
+                        fontColor: '#9ca3af',
+                        fontSize: 12,
+                        stepSize: 1
+                    },
+                    gridLines: { 
+                        display: true, 
+                        color: 'rgba(75, 85, 99, 0.3)',
+                        drawBorder: false
                     }
                 }]
             }
@@ -381,19 +380,14 @@ function generateBarChartUrl(poll: Poll): string {
     };
     
     const chartJson = encodeURIComponent(JSON.stringify(chartConfig));
-    // Much wider chart (900px), comfortable height per option
-    const height = Math.max(200, stats.options.length * 70 + 80);
-    return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%231f2937&width=900&height=' + height + '&devicePixelRatio=2';
+    // Square-ish chart, no stretching
+    return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%231f2937&width=500&height=400&devicePixelRatio=2';
 }
 
-function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar'): { msg: string; attachments: any[] } {
+function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar' | 'both'): { msg: string; attachments: any[] } {
     const stats = calculateStats(poll);
     const emojis = ['🔴', '🔵', '🟢', '🟡', '🟣', '🟠'];
     const maxVotes = Math.max(...stats.options.map(o => o.votes));
-    
-    // Generate chart URL based on type
-    const chartUrl = chartType === 'bar' ? generateBarChartUrl(poll) : generatePieChartUrl(poll);
-    const chartTitle = chartType === 'bar' ? '📊 Bar Chart Results' : '📊 Pie Chart Results';
     
     // Build text summary
     let summary = '📊 **POLL RESULTS**\n\n';
@@ -412,14 +406,24 @@ function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar'): { msg: stri
     summary += '\n👥 ' + stats.totalVoters + ' voters • 📝 ' + stats.totalVotes + ' votes';
     summary += '\n' + (poll.isAnonymous ? '🔒 Anonymous' : '👁 Public');
     
-    // Return message with image attachment
-    return {
-        msg: summary,
-        attachments: [{
-            image_url: chartUrl,
-            title: chartTitle
-        }]
-    };
+    // Generate attachments based on type
+    const attachments: any[] = [];
+    
+    if (chartType === 'both' || chartType === 'pie') {
+        attachments.push({
+            image_url: generatePieChartUrl(poll),
+            title: '🥧 Pie Chart'
+        });
+    }
+    
+    if (chartType === 'both' || chartType === 'bar') {
+        attachments.push({
+            image_url: generateBarChartUrl(poll),
+            title: '📊 Bar Chart'
+        });
+    }
+    
+    return { msg: summary, attachments };
 }
 
 // ============================================================================
@@ -868,7 +872,7 @@ Meteor.methods({
         return { success: true };
     },
 
-    async 'poll.export'(pollId: string, chartType?: 'pie' | 'bar') {
+    async 'poll.export'(pollId: string, chartType?: 'pie' | 'bar' | 'both') {
         const userId = Meteor.userId();
         if (!userId) throw new Meteor.Error('not-authorized');
 
@@ -876,8 +880,8 @@ Meteor.methods({
         if (!poll) throw new Meteor.Error('not-found', 'Poll not found');
         if (!poll.isClosed) throw new Meteor.Error('not-closed', 'Close the poll first');
 
-        // Generate and send chart with image (default to pie)
-        const type = chartType === 'bar' ? 'bar' : 'pie';
+        // Generate and send chart(s)
+        const type = chartType === 'bar' ? 'bar' : (chartType === 'both' ? 'both' : 'pie');
         const { msg, attachments } = generateChartMessage(poll, type);
         await executeSendMessage(userId, {
             rid: poll.roomId,
