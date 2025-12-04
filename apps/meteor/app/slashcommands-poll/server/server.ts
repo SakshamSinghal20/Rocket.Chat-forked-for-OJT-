@@ -374,7 +374,7 @@ function generateBarChartUrl(poll: Poll): string {
     return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%231f2937&width=500&height=400&devicePixelRatio=2';
 }
 
-function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar' | 'both'): { msg: string; attachments: any[] } {
+function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar' | 'both'): { msg: string; attachments: any[]; blocks: any[] } {
     const stats = calculateStats(poll);
     const emojis = ['🔴', '🔵', '🟢', '🟡', '🟣', '🟠'];
     const maxVotes = Math.max(...stats.options.map(o => o.votes));
@@ -413,7 +413,28 @@ function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar' | 'both'): { 
         });
     }
     
-    return { msg: summary, attachments };
+    // Add action buttons to the results message
+    const blocks: any[] = [
+        {
+            type: 'actions',
+            elements: [
+                {
+                    type: 'button',
+                    text: { type: 'plain_text', text: '👁 View Voters', emoji: true },
+                    value: 'pollviewers_' + poll.id,
+                    actionId: 'pollviewers_' + poll.id
+                },
+                {
+                    type: 'button',
+                    text: { type: 'plain_text', text: '📊 Export Charts', emoji: true },
+                    value: 'pollexport_' + poll.id + '_both',
+                    actionId: 'pollexport_' + poll.id + '_both'
+                }
+            ]
+        }
+    ];
+    
+    return { msg: summary, attachments, blocks };
 }
 
 // ============================================================================
@@ -870,13 +891,14 @@ Meteor.methods({
         if (!poll) throw new Meteor.Error('not-found', 'Poll not found');
         if (!poll.isClosed) throw new Meteor.Error('not-closed', 'Close the poll first');
 
-        // Generate and send chart(s)
+        // Generate and send chart(s) with action buttons
         const type = chartType === 'bar' ? 'bar' : (chartType === 'both' ? 'both' : 'pie');
-        const { msg, attachments } = generateChartMessage(poll, type);
+        const { msg, attachments, blocks } = generateChartMessage(poll, type);
         await executeSendMessage(userId, {
             rid: poll.roomId,
             msg,
-            attachments
+            attachments,
+            blocks
         });
 
         return { success: true };
