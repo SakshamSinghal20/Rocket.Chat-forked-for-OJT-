@@ -288,56 +288,66 @@ function generatePieChartUrl(poll: Poll): string {
 
 function generateBarChartUrl(poll: Poll): string {
     const stats = calculateStats(poll);
-    const labels = stats.options.map(o => o.text);
+    const labels = stats.options.map(o => o.text + ' (' + o.percentage + '%)');
     const data = stats.options.map(o => o.votes);
-    const colors = ['#dc2626', '#2563eb', '#16a34a', '#ca8a04', '#9333ea', '#ea580c'];
-    const bgColors = stats.options.map((_, i) => colors[i % colors.length]);
     
+    // Use Rocket.Chat theme colors - subtle blue gradient
     const chartConfig = {
-        type: 'bar',
+        type: 'horizontalBar',
         data: {
             labels: labels,
             datasets: [{
-                label: 'Votes',
                 data: data,
-                backgroundColor: bgColors,
-                borderColor: bgColors,
-                borderWidth: 1
+                backgroundColor: '#156ff5',
+                borderColor: '#1d74f5',
+                borderWidth: 0,
+                barThickness: 18,
+                borderRadius: 4
             }]
         },
         options: {
-            indexAxis: 'y',
             responsive: true,
+            maintainAspectRatio: false,
+            layout: { padding: { left: 10, right: 30, top: 10, bottom: 10 } },
             plugins: {
                 legend: { display: false },
                 datalabels: {
                     display: true,
-                    color: '#ffffff',
+                    color: '#e4e7ea',
                     anchor: 'end',
-                    align: 'start',
-                    offset: 5,
-                    font: { weight: 'bold', size: 14 },
+                    align: 'end',
+                    offset: 4,
+                    font: { weight: 'bold', size: 13 },
                     formatter: function(value: number) {
-                        return value > 0 ? value : '';
+                        return value;
                     }
                 }
             },
             scales: {
-                x: {
-                    beginAtZero: true,
-                    grid: { color: '#404040' },
-                    ticks: { color: '#e4e7ea', font: { size: 12 } }
-                },
-                y: {
-                    grid: { display: false },
-                    ticks: { color: '#e4e7ea', font: { size: 14, weight: 'bold' } }
-                }
+                xAxes: [{
+                    ticks: { 
+                        beginAtZero: true, 
+                        display: false
+                    },
+                    gridLines: { display: false }
+                }],
+                yAxes: [{
+                    gridLines: { display: false },
+                    ticks: { 
+                        fontColor: '#e4e7ea', 
+                        fontSize: 13,
+                        fontStyle: 'bold',
+                        padding: 8
+                    }
+                }]
             }
         }
     };
     
     const chartJson = encodeURIComponent(JSON.stringify(chartConfig));
-    return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%232f343d&width=600&height=400&devicePixelRatio=2';
+    // Height based on number of options (50px per option + padding)
+    const height = Math.max(150, stats.options.length * 50 + 40);
+    return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%232f343d&width=550&height=' + height + '&devicePixelRatio=2';
 }
 
 function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar'): { msg: string; attachments: any[] } {
@@ -390,59 +400,77 @@ function schedulePoll(poll: Poll) {
         scheduledTimers.delete(poll.id);
     }
     
-    const delay = poll.scheduledAt.getTime() - Date.now();
+    const now = Date.now();
+    const scheduledTime = poll.scheduledAt.getTime();
+    const delay = scheduledTime - now;
+    
+    console.log('[Poll] Schedule info for ' + poll.id + ':');
+    console.log('[Poll]   - Scheduled for: ' + poll.scheduledAt.toISOString());
+    console.log('[Poll]   - Current time: ' + new Date(now).toISOString());
+    console.log('[Poll]   - Delay (ms): ' + delay);
     
     if (delay <= 0) {
         // Already past, publish immediately
-        console.log('[Poll] Scheduled time passed, publishing now: ' + poll.id);
-        publishPoll(poll);
+        console.log('[Poll] Scheduled time already passed, publishing now: ' + poll.id);
+        void publishPollAsync(poll);
         return;
     }
     
     // Cap timeout to avoid overflow (max ~24 days)
-    const maxDelay = 2147483647; // Max 32-bit signed int
+    const maxDelay = 2147483647;
     const actualDelay = Math.min(delay, maxDelay);
     
-    console.log('[Poll] Scheduling poll ' + poll.id + ' in ' + Math.round(actualDelay / 1000) + ' seconds');
+    console.log('[Poll] Setting timer for ' + poll.id + ' in ' + Math.round(actualDelay / 1000) + ' seconds');
     
-    const timer = setTimeout(() => {
+    const timer = Meteor.setTimeout(() => {
+        console.log('[Poll] Timer fired for: ' + poll.id);
         scheduledTimers.delete(poll.id);
         
-        // Double-check poll still exists and is scheduled
+        // Get fresh poll data
         const currentPoll = polls.get(poll.id);
-        if (currentPoll && currentPoll.scheduledAt && !currentPoll.messageId) {
-            publishPoll(currentPoll);
+        if (!currentPoll) {
+            console.log('[Poll] Poll not found: ' + poll.id);
+            return;
         }
+        if (currentPoll.messageId) {
+            console.log('[Poll] Already published: ' + poll.id);
+            return;
+        }
+        
+        void publishPollAsync(currentPoll);
     }, actualDelay);
     
     scheduledTimers.set(poll.id, timer);
+    console.log('[Poll] Timer set successfully for: ' + poll.id);
 }
 
-async function publishPoll(poll: Poll) {
+async function publishPollAsync(poll: Poll): Promise<void> {
     // Prevent double-publishing
     if (poll.messageId) {
-        console.log('[Poll] Already published: ' + poll.id);
+        console.log('[Poll] Already published (double-check): ' + poll.id);
         return;
     }
     
     try {
-        console.log('[Poll] Publishing poll: ' + poll.id);
+        console.log('[Poll] Publishing poll now: ' + poll.id + ' to room: ' + poll.roomId);
+        
+        const blocks = buildPollBlocks(poll, poll.creator);
         
         const sent = await executeSendMessage(poll.creator, {
             rid: poll.roomId,
             msg: '',
-            blocks: buildPollBlocks(poll, poll.creator)
+            blocks: blocks
         });
         
         if (sent?._id) {
             poll.messageId = sent._id;
             poll.scheduledAt = undefined;
-            console.log('[Poll] Successfully published: ' + poll.id);
+            console.log('[Poll] ✅ Successfully published: ' + poll.id + ' messageId: ' + sent._id);
         } else {
-            console.error('[Poll] No message ID returned for: ' + poll.id);
+            console.error('[Poll] ❌ No message ID returned for: ' + poll.id);
         }
     } catch (err) {
-        console.error('[Poll] Failed to publish scheduled poll:', err);
+        console.error('[Poll] ❌ Failed to publish scheduled poll ' + poll.id + ':', err);
     }
 }
 
@@ -463,7 +491,7 @@ Meteor.methods({
         if (!userId) throw new Meteor.Error('not-authorized');
 
         const { roomId, question, options, allowMultiple, isAnonymous, scheduledAt } = data;
-        
+
         if (!roomId) throw new Meteor.Error('invalid-room', 'Room required');
         const room = await Rooms.findOneById(roomId, { projection: { _id: 1 } });
         if (!room) throw new Meteor.Error('invalid-room', 'Room not found');
@@ -505,14 +533,14 @@ Meteor.methods({
             totalVoters: new Set()
         };
 
-        polls.set(pollId, poll);
+            polls.set(pollId, poll);
 
         // Handle scheduled polls
         if (scheduledDate) {
             schedulePoll(poll);
-            return { 
-                success: true, 
-                pollId, 
+        return { 
+            success: true, 
+            pollId, 
                 scheduled: true, 
                 scheduledFor: scheduledDate.toISOString() 
             };
@@ -537,7 +565,7 @@ Meteor.methods({
     async 'poll.vote'(pollId: string, optionId: string) {
         const userId = Meteor.userId();
         if (!userId) throw new Meteor.Error('not-authorized');
-        
+
         const poll = polls.get(pollId);
         if (!poll) throw new Meteor.Error('not-found', 'Poll not found');
         if (poll.isClosed) throw new Meteor.Error('closed', 'Poll is closed');
@@ -670,15 +698,20 @@ function checkPendingScheduledPolls() {
     let rescheduled = 0;
     let published = 0;
     
+    console.log('[Poll] Checking ' + polls.size + ' polls for pending schedules...');
+    
     polls.forEach((poll) => {
         // Only process polls that are scheduled but not yet published
         if (poll.scheduledAt && !poll.messageId && !poll.isClosed) {
+            console.log('[Poll] Found pending scheduled poll: ' + poll.id);
             if (poll.scheduledAt.getTime() <= now) {
                 // Time has passed, publish immediately
-                publishPoll(poll);
+                console.log('[Poll] Time passed, publishing: ' + poll.id);
+                void publishPollAsync(poll);
                 published++;
             } else {
                 // Re-schedule for future
+                console.log('[Poll] Re-scheduling: ' + poll.id);
                 schedulePoll(poll);
                 rescheduled++;
             }
@@ -686,7 +719,7 @@ function checkPendingScheduledPolls() {
     });
     
     if (rescheduled > 0 || published > 0) {
-        console.log('[Poll] Startup check: ' + published + ' published, ' + rescheduled + ' rescheduled');
+        console.log('[Poll] Check complete: ' + published + ' published, ' + rescheduled + ' rescheduled');
     }
 }
 
