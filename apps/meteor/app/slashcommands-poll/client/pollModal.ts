@@ -1,4 +1,5 @@
 // Poll Modal - Rocket.Chat Native Theme
+// @ts-ignore - Meteor package import
 import { Meteor } from 'meteor/meteor';
 import { RoomManager } from '../../../client/lib/RoomManager';
 
@@ -34,18 +35,14 @@ function notify(message: string, type: 'success' | 'error' | 'info' = 'info') {
         return div;
     })();
     
-    const colors = {
+    const colors: Record<string, string> = {
         success: '#16a34a',
         error: '#dc2626',
         info: '#2563eb'
     };
     
     const toast = document.createElement('div');
-    toast.style.cssText = \`
-        background:\${colors[type]};color:#fff;padding:12px 20px;
-        border-radius:6px;margin-bottom:8px;font-size:14px;
-        box-shadow:0 4px 12px rgba(0,0,0,0.3);
-    \`;
+    toast.style.cssText = `background:${colors[type]};color:#fff;padding:12px 20px;border-radius:6px;margin-bottom:8px;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);`;
     toast.textContent = message;
     container.appendChild(toast);
     
@@ -66,51 +63,31 @@ async function showPollModal() {
     // Modal container
     const container = document.createElement('div');
     container.id = 'poll-modal-container';
-    container.style.cssText = \`
-        position:fixed;inset:0;background:rgba(0,0,0,0.7);
-        display:flex;align-items:center;justify-content:center;
-        z-index:99999;
-    \`;
+    container.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:99999;';
     
     // Modal box - Rocket.Chat dark theme
     const modal = document.createElement('div');
-    modal.style.cssText = \`
-        background:#1f2329;color:#e4e7ea;width:450px;max-width:90vw;
-        border-radius:4px;box-shadow:0 8px 32px rgba(0,0,0,0.5);
-        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-    \`;
+    modal.style.cssText = 'background:#1f2329;color:#e4e7ea;width:450px;max-width:90vw;border-radius:4px;box-shadow:0 8px 32px rgba(0,0,0,0.5);font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;';
     
-    modal.innerHTML = \`
+    modal.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #2f343d;">
-            <h3 style="margin:0;font-size:18px;font-weight:500;">í³Š Create Poll</h3>
+            <h3 style="margin:0;font-size:18px;font-weight:500;">ðŸ“Š Create Poll</h3>
             <button id="poll-close-btn" style="background:none;border:none;color:#9ea2a8;font-size:24px;cursor:pointer;padding:0;">&times;</button>
         </div>
         
         <div style="padding:20px;">
             <div style="margin-bottom:16px;">
                 <label style="display:block;font-size:13px;color:#9ea2a8;margin-bottom:6px;">Question</label>
-                <input id="poll-question" type="text" placeholder="Ask something..." style="
-                    width:100%;padding:10px 12px;background:#2f343d;border:1px solid #414852;
-                    border-radius:4px;color:#e4e7ea;font-size:14px;box-sizing:border-box;
-                ">
+                <input id="poll-question" type="text" placeholder="Ask something..." style="width:100%;padding:10px 12px;background:#2f343d;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;box-sizing:border-box;">
             </div>
             
             <div style="margin-bottom:16px;">
                 <label style="display:block;font-size:13px;color:#9ea2a8;margin-bottom:6px;">Options</label>
                 <div id="poll-options">
-                    <input type="text" class="poll-option" placeholder="Option A" style="
-                        width:100%;padding:10px 12px;background:#2f343d;border:1px solid #414852;
-                        border-radius:4px;color:#e4e7ea;font-size:14px;margin-bottom:8px;box-sizing:border-box;
-                    ">
-                    <input type="text" class="poll-option" placeholder="Option B" style="
-                        width:100%;padding:10px 12px;background:#2f343d;border:1px solid #414852;
-                        border-radius:4px;color:#e4e7ea;font-size:14px;margin-bottom:8px;box-sizing:border-box;
-                    ">
+                    <input type="text" class="poll-option" placeholder="Option A" style="width:100%;padding:10px 12px;background:#2f343d;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;margin-bottom:8px;box-sizing:border-box;">
+                    <input type="text" class="poll-option" placeholder="Option B" style="width:100%;padding:10px 12px;background:#2f343d;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;margin-bottom:8px;box-sizing:border-box;">
                 </div>
-                <button id="add-option-btn" style="
-                    background:transparent;border:1px dashed #414852;color:#9ea2a8;
-                    padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px;width:100%;
-                ">+ Add Option</button>
+                <button id="add-option-btn" style="background:transparent;border:1px dashed #414852;color:#9ea2a8;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px;width:100%;">+ Add Option</button>
             </div>
             
             <div style="display:flex;gap:20px;margin-bottom:20px;padding:12px;background:#2f343d;border-radius:4px;">
@@ -126,16 +103,10 @@ async function showPollModal() {
         </div>
         
         <div style="display:flex;justify-content:flex-end;gap:12px;padding:16px 20px;border-top:1px solid #2f343d;">
-            <button id="poll-cancel-btn" style="
-                background:#2f343d;border:none;color:#e4e7ea;padding:10px 20px;
-                border-radius:4px;cursor:pointer;font-size:14px;
-            ">Cancel</button>
-            <button id="poll-create-btn" style="
-                background:#1d74f5;border:none;color:#fff;padding:10px 20px;
-                border-radius:4px;cursor:pointer;font-size:14px;font-weight:500;
-            ">Create Poll</button>
+            <button id="poll-cancel-btn" style="background:#2f343d;border:none;color:#e4e7ea;padding:10px 20px;border-radius:4px;cursor:pointer;font-size:14px;">Cancel</button>
+            <button id="poll-create-btn" style="background:#1d74f5;border:none;color:#fff;padding:10px 20px;border-radius:4px;cursor:pointer;font-size:14px;font-weight:500;">Create Poll</button>
         </div>
-    \`;
+    `;
     
     container.appendChild(modal);
     document.body.appendChild(container);
@@ -167,11 +138,8 @@ async function showPollModal() {
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'poll-option';
-        input.placeholder = \`Option \${letter}\`;
-        input.style.cssText = \`
-            width:100%;padding:10px 12px;background:#2f343d;border:1px solid #414852;
-            border-radius:4px;color:#e4e7ea;font-size:14px;margin-bottom:8px;box-sizing:border-box;
-        \`;
+        input.placeholder = `Option ${letter}`;
+        input.style.cssText = 'width:100%;padding:10px 12px;background:#2f343d;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;margin-bottom:8px;box-sizing:border-box;';
         optionsDiv.appendChild(input);
         input.focus();
     };
