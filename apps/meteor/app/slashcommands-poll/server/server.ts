@@ -412,28 +412,40 @@ function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar'): { msg: stri
 function saveScheduledPollToDb(poll: Poll) {
     if (!poll.scheduledAt) return;
     
-    const doc: ScheduledPollDoc = {
-        _id: poll.id,
-        pollId: poll.id,
-        question: poll.question,
-        options: poll.options.map(o => ({ id: o.id, text: o.text })),
-        creator: poll.creator,
-        creatorName: poll.creatorName || 'Unknown',
-        roomId: poll.roomId,
-        allowMultiple: poll.allowMultiple,
-        isAnonymous: poll.isAnonymous,
-        scheduledAt: poll.scheduledAt,
-        createdAt: poll.createdAt
-    };
-    
-    // Upsert to MongoDB
-    ScheduledPolls.upsert({ _id: poll.id }, { $set: doc });
-    console.log('[Poll] 💾 Saved to MongoDB: ' + poll.id);
+    try {
+        const doc: ScheduledPollDoc = {
+            _id: poll.id,
+            pollId: poll.id,
+            question: poll.question,
+            options: poll.options.map(o => ({ id: o.id, text: o.text })),
+            creator: poll.creator,
+            creatorName: poll.creatorName || 'Unknown',
+            roomId: poll.roomId,
+            allowMultiple: poll.allowMultiple,
+            isAnonymous: poll.isAnonymous,
+            scheduledAt: poll.scheduledAt,
+            createdAt: poll.createdAt
+        };
+        
+        // Upsert to MongoDB
+        ScheduledPolls.upsert({ _id: poll.id }, { $set: doc });
+        console.log('[Poll] 💾 Saved to MongoDB: ' + poll.id);
+    } catch (err: any) {
+        console.error('[Poll] ❌ Failed to save to MongoDB: ' + poll.id);
+        console.error('[Poll]   - Error:', err?.message || err);
+        throw err; // Re-throw so caller can handle
+    }
 }
 
 function removeScheduledPollFromDb(pollId: string) {
-    ScheduledPolls.remove({ _id: pollId });
-    console.log('[Poll] 🗑️ Removed from MongoDB: ' + pollId);
+    try {
+        ScheduledPolls.remove({ _id: pollId });
+        console.log('[Poll] 🗑️ Removed from MongoDB: ' + pollId);
+    } catch (err: any) {
+        console.error('[Poll] ⚠️ Failed to remove from MongoDB: ' + pollId);
+        console.error('[Poll]   - Error:', err?.message || err);
+        // Don't throw - removal failure shouldn't break publishing
+    }
 }
 
 function recreatePollFromDoc(doc: ScheduledPollDoc): Poll {
@@ -537,10 +549,34 @@ async function publishPollAsync(poll: Poll): Promise<void> {
     }
     
     try {
-        console.log('[Poll] 📤 Publishing poll now: ' + poll.id + ' to room: ' + poll.roomId);
+        console.log('[Poll] 📤 Publishing scheduled poll: ' + poll.id);
+        console.log('[Poll]   - Room: ' + poll.roomId);
+        console.log('[Poll]   - Creator: ' + poll.creator);
+        console.log('[Poll]   - Question: ' + poll.question);
         
+        // Validate room exists
+        const room = await Rooms.findOneById(poll.roomId);
+        if (!room) {
+            console.error('[Poll] ❌ Room not found: ' + poll.roomId);
+            removeScheduledPollFromDb(poll.id);
+            return;
+        }
+        console.log('[Poll]   - Room verified: ' + room.name);
+        
+        // Validate user exists
+        const user = await Users.findOneById(poll.creator);
+        if (!user) {
+            console.error('[Poll] ❌ Creator user not found: ' + poll.creator);
+            removeScheduledPollFromDb(poll.id);
+            return;
+        }
+        console.log('[Poll]   - User verified: ' + user.username);
+        
+        // Build poll blocks
         const blocks = buildPollBlocks(poll, poll.creator);
+        console.log('[Poll]   - Blocks built: ' + blocks.length + ' blocks');
         
+        // Send message
         const sent = await executeSendMessage(poll.creator, {
             rid: poll.roomId,
             msg: '',
@@ -554,12 +590,20 @@ async function publishPollAsync(poll: Poll): Promise<void> {
             // Remove from MongoDB since it's now published
             removeScheduledPollFromDb(poll.id);
             
-            console.log('[Poll] ✅ Successfully published: ' + poll.id + ' messageId: ' + sent._id);
+            console.log('[Poll] ✅ Successfully published: ' + poll.id);
+            console.log('[Poll]   - Message ID: ' + sent._id);
         } else {
             console.error('[Poll] ❌ No message ID returned for: ' + poll.id);
+            console.error('[Poll]   - Response:', JSON.stringify(sent));
         }
-    } catch (err) {
-        console.error('[Poll] ❌ Failed to publish scheduled poll ' + poll.id + ':', err);
+    } catch (err: any) {
+        console.error('[Poll] ❌ Failed to publish scheduled poll ' + poll.id);
+        console.error('[Poll]   - Error type:', err?.constructor?.name);
+        console.error('[Poll]   - Error message:', err?.message || err?.reason || String(err));
+        console.error('[Poll]   - Error details:', err?.details || 'none');
+        console.error('[Poll]   - Full error:', err);
+        
+        // Don't remove from DB on error - allow retry
     }
 }
 
@@ -622,32 +666,54 @@ Meteor.methods({
             totalVoters: new Set()
         };
 
-            polls.set(pollId, poll);
+        polls.set(pollId, poll);
 
         // Handle scheduled polls
         if (scheduledDate) {
-            schedulePoll(poll);
+            try {
+                console.log('[Poll] Creating scheduled poll: ' + pollId);
+                console.log('[Poll]   - Question: ' + question);
+                console.log('[Poll]   - Scheduled for: ' + scheduledDate.toISOString());
+                console.log('[Poll]   - Room: ' + roomId);
+                
+                schedulePoll(poll);
+                
+                console.log('[Poll] ✅ Scheduled poll created successfully: ' + pollId);
+
         return { 
             success: true, 
             pollId, 
-                scheduled: true, 
-                scheduledFor: scheduledDate.toISOString() 
-            };
+                    scheduled: true, 
+                    scheduledFor: scheduledDate.toISOString() 
+                };
+            } catch (err: any) {
+                console.error('[Poll] ❌ Failed to schedule poll: ' + pollId);
+                console.error('[Poll]   - Error:', err?.message || err);
+                polls.delete(pollId);
+                throw new Meteor.Error('schedule-failed', 'Failed to schedule poll: ' + (err?.message || 'Unknown error'));
+            }
         }
 
         // Publish immediately
         try {
+            console.log('[Poll] Creating immediate poll: ' + pollId);
+            
             const sent = await executeSendMessage(userId, {
                 rid: roomId,
                 msg: '',
                 blocks: buildPollBlocks(poll, userId)
             });
             
-            if (sent?._id) poll.messageId = sent._id;
+            if (sent?._id) {
+                poll.messageId = sent._id;
+                console.log('[Poll] ✅ Poll created: ' + pollId + ' -> ' + sent._id);
+            }
             return { success: true, pollId };
         } catch (err: any) {
+            console.error('[Poll] ❌ Failed to create poll: ' + pollId);
+            console.error('[Poll]   - Error:', err?.message || err?.reason || err);
             polls.delete(pollId);
-            throw new Meteor.Error('create-failed', err?.reason || 'Failed to create poll');
+            throw new Meteor.Error('create-failed', err?.reason || err?.message || 'Failed to create poll');
         }
     },
 
