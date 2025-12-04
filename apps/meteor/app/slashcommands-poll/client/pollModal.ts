@@ -42,12 +42,29 @@ function notify(message: string, type: 'success' | 'error' | 'info' = 'info') {
     };
     
     const toast = document.createElement('div');
-    toast.style.cssText = `background:${colors[type]};color:#fff;padding:12px 20px;border-radius:6px;margin-bottom:8px;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);`;
+    toast.style.cssText = `background:${colors[type]};color:#fff;padding:12px 20px;border-radius:6px;margin-bottom:8px;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);animation:slideIn 0.3s ease;`;
     toast.textContent = message;
     container.appendChild(toast);
     
-    setTimeout(() => toast.remove(), 4000);
+    setTimeout(() => {
+        toast.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
 }
+
+// Add animation styles
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideIn {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes slideOut {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(100%); opacity: 0; }
+    }
+`;
+document.head.appendChild(style);
 
 // Create poll modal
 async function showPollModal() {
@@ -67,42 +84,76 @@ async function showPollModal() {
     
     // Modal box - Rocket.Chat dark theme
     const modal = document.createElement('div');
-    modal.style.cssText = 'background:#1f2329;color:#e4e7ea;width:450px;max-width:90vw;border-radius:4px;box-shadow:0 8px 32px rgba(0,0,0,0.5);font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;';
+    modal.style.cssText = 'background:#1f2329;color:#e4e7ea;width:480px;max-width:90vw;max-height:90vh;overflow-y:auto;border-radius:4px;box-shadow:0 8px 32px rgba(0,0,0,0.5);font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;';
     
     modal.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #2f343d;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #2f343d;position:sticky;top:0;background:#1f2329;z-index:1;">
             <h3 style="margin:0;font-size:18px;font-weight:500;">📊 Create Poll</h3>
-            <button id="poll-close-btn" style="background:none;border:none;color:#9ea2a8;font-size:24px;cursor:pointer;padding:0;">&times;</button>
+            <button id="poll-close-btn" style="background:none;border:none;color:#9ea2a8;font-size:24px;cursor:pointer;padding:0;line-height:1;">&times;</button>
         </div>
         
         <div style="padding:20px;">
+            <!-- Question -->
             <div style="margin-bottom:16px;">
-                <label style="display:block;font-size:13px;color:#9ea2a8;margin-bottom:6px;">Question</label>
-                <input id="poll-question" type="text" placeholder="Ask something..." style="width:100%;padding:10px 12px;background:#2f343d;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;box-sizing:border-box;">
+                <label style="display:block;font-size:13px;color:#9ea2a8;margin-bottom:6px;">Question *</label>
+                <input id="poll-question" type="text" placeholder="What do you want to ask?" style="width:100%;padding:10px 12px;background:#2f343d;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;box-sizing:border-box;">
             </div>
             
+            <!-- Options -->
             <div style="margin-bottom:16px;">
-                <label style="display:block;font-size:13px;color:#9ea2a8;margin-bottom:6px;">Options</label>
+                <label style="display:block;font-size:13px;color:#9ea2a8;margin-bottom:6px;">Options * (min 2)</label>
                 <div id="poll-options">
-                    <input type="text" class="poll-option" placeholder="Option A" style="width:100%;padding:10px 12px;background:#2f343d;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;margin-bottom:8px;box-sizing:border-box;">
-                    <input type="text" class="poll-option" placeholder="Option B" style="width:100%;padding:10px 12px;background:#2f343d;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;margin-bottom:8px;box-sizing:border-box;">
+                    <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
+                        <span style="color:#f87171;font-weight:bold;width:20px;">A</span>
+                        <input type="text" class="poll-option" placeholder="First option" style="flex:1;padding:10px 12px;background:#2f343d;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;box-sizing:border-box;">
+                    </div>
+                    <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
+                        <span style="color:#60a5fa;font-weight:bold;width:20px;">B</span>
+                        <input type="text" class="poll-option" placeholder="Second option" style="flex:1;padding:10px 12px;background:#2f343d;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;box-sizing:border-box;">
+                    </div>
                 </div>
-                <button id="add-option-btn" style="background:transparent;border:1px dashed #414852;color:#9ea2a8;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px;width:100%;">+ Add Option</button>
+                <button id="add-option-btn" style="background:transparent;border:1px dashed #414852;color:#9ea2a8;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px;width:100%;margin-top:4px;">+ Add Option (max 6)</button>
             </div>
             
-            <div style="display:flex;gap:20px;margin-bottom:20px;padding:12px;background:#2f343d;border-radius:4px;">
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
-                    <input type="checkbox" id="allow-multiple" style="width:16px;height:16px;accent-color:#1d74f5;">
-                    Multiple choice
+            <!-- Settings -->
+            <div style="margin-bottom:16px;padding:12px;background:#2f343d;border-radius:4px;">
+                <label style="display:block;font-size:13px;color:#9ea2a8;margin-bottom:8px;">Poll Settings</label>
+                <div style="display:flex;flex-wrap:wrap;gap:16px;">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+                        <input type="checkbox" id="allow-multiple" style="width:16px;height:16px;accent-color:#1d74f5;">
+                        Multiple choice
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+                        <input type="checkbox" id="is-anonymous" style="width:16px;height:16px;accent-color:#1d74f5;">
+                        Anonymous voting
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Schedule -->
+            <div style="margin-bottom:16px;padding:12px;background:#2f343d;border-radius:4px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin-bottom:8px;">
+                    <input type="checkbox" id="enable-schedule" style="width:16px;height:16px;accent-color:#1d74f5;">
+                    Schedule for later
                 </label>
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
-                    <input type="checkbox" id="is-anonymous" style="width:16px;height:16px;accent-color:#1d74f5;">
-                    Anonymous
-                </label>
+                <div id="schedule-options" style="display:none;margin-top:8px;">
+                    <input type="datetime-local" id="schedule-time" style="width:100%;padding:10px 12px;background:#1f2329;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;box-sizing:border-box;">
+                    <p style="margin:4px 0 0;font-size:11px;color:#9ea2a8;">Poll will be published at this time</p>
+                </div>
+            </div>
+            
+            <!-- Help text -->
+            <div style="padding:12px;background:#1a1d21;border-radius:4px;border-left:3px solid #1d74f5;">
+                <p style="margin:0 0 8px;font-size:12px;color:#9ea2a8;"><strong>How to use:</strong></p>
+                <p style="margin:0;font-size:12px;color:#6b7280;">
+                    • Vote: <code style="background:#2f343d;padding:2px 6px;border-radius:3px;">/poll-vote poll_id A</code><br>
+                    • Close (admin): <code style="background:#2f343d;padding:2px 6px;border-radius:3px;">/poll-close poll_id</code><br>
+                    • Export results: <code style="background:#2f343d;padding:2px 6px;border-radius:3px;">/poll-export poll_id</code>
+                </p>
             </div>
         </div>
         
-        <div style="display:flex;justify-content:flex-end;gap:12px;padding:16px 20px;border-top:1px solid #2f343d;">
+        <div style="display:flex;justify-content:flex-end;gap:12px;padding:16px 20px;border-top:1px solid #2f343d;position:sticky;bottom:0;background:#1f2329;">
             <button id="poll-cancel-btn" style="background:#2f343d;border:none;color:#e4e7ea;padding:10px 20px;border-radius:4px;cursor:pointer;font-size:14px;">Cancel</button>
             <button id="poll-create-btn" style="background:#1d74f5;border:none;color:#fff;padding:10px 20px;border-radius:4px;cursor:pointer;font-size:14px;font-weight:500;">Create Poll</button>
         </div>
@@ -125,24 +176,60 @@ async function showPollModal() {
     document.getElementById('poll-close-btn')!.onclick = () => container.remove();
     document.getElementById('poll-cancel-btn')!.onclick = () => container.remove();
     
+    // Schedule toggle
+    const scheduleCheckbox = document.getElementById('enable-schedule') as HTMLInputElement;
+    const scheduleOptions = document.getElementById('schedule-options') as HTMLDivElement;
+    const scheduleTime = document.getElementById('schedule-time') as HTMLInputElement;
+    
+    // Set minimum date to now
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    scheduleTime.min = now.toISOString().slice(0, 16);
+    
+    scheduleCheckbox.onchange = () => {
+        scheduleOptions.style.display = scheduleCheckbox.checked ? 'block' : 'none';
+    };
+    
     // Add option
+    const optionColors = ['#f87171', '#60a5fa', '#34d399', '#fbbf24', '#a78bfa', '#fb7185'];
     document.getElementById('add-option-btn')!.onclick = () => {
         const optionsDiv = document.getElementById('poll-options')!;
         const count = optionsDiv.querySelectorAll('.poll-option').length;
         if (count >= 6) {
-            notify('Maximum 6 options', 'info');
+            notify('Maximum 6 options allowed', 'info');
             return;
         }
         
         const letter = String.fromCharCode(65 + count);
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'poll-option';
-        input.placeholder = `Option ${letter}`;
-        input.style.cssText = 'width:100%;padding:10px 12px;background:#2f343d;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;margin-bottom:8px;box-sizing:border-box;';
-        optionsDiv.appendChild(input);
-        input.focus();
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;align-items:center;';
+        wrapper.innerHTML = `
+            <span style="color:${optionColors[count]};font-weight:bold;width:20px;">${letter}</span>
+            <input type="text" class="poll-option" placeholder="Option ${letter}" style="flex:1;padding:10px 12px;background:#2f343d;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;box-sizing:border-box;">
+            <button class="remove-option" style="background:none;border:none;color:#ef4444;font-size:18px;cursor:pointer;padding:4px 8px;">×</button>
+        `;
+        
+        wrapper.querySelector('.remove-option')!.addEventListener('click', () => {
+            wrapper.remove();
+            updateOptionLabels();
+        });
+        
+        optionsDiv.appendChild(wrapper);
+        (wrapper.querySelector('.poll-option') as HTMLInputElement).focus();
     };
+    
+    // Update option labels after removal
+    function updateOptionLabels() {
+        const optionsDiv = document.getElementById('poll-options')!;
+        const wrappers = optionsDiv.children;
+        for (let i = 0; i < wrappers.length; i++) {
+            const label = wrappers[i].querySelector('span');
+            if (label) {
+                label.textContent = String.fromCharCode(65 + i);
+                label.style.color = optionColors[i];
+            }
+        }
+    }
     
     // Create poll
     document.getElementById('poll-create-btn')!.onclick = async () => {
@@ -151,6 +238,8 @@ async function showPollModal() {
         const options = Array.from(optionInputs).map(i => i.value.trim()).filter(Boolean);
         const allowMultiple = (document.getElementById('allow-multiple') as HTMLInputElement).checked;
         const isAnonymous = (document.getElementById('is-anonymous') as HTMLInputElement).checked;
+        const scheduleEnabled = scheduleCheckbox.checked;
+        const scheduledAt = scheduleEnabled ? scheduleTime.value : null;
         
         if (!question) {
             notify('Please enter a question', 'error');
@@ -160,23 +249,37 @@ async function showPollModal() {
             notify('Please add at least 2 options', 'error');
             return;
         }
+        if (scheduleEnabled && !scheduledAt) {
+            notify('Please select a schedule time', 'error');
+            return;
+        }
+        if (scheduleEnabled && new Date(scheduledAt!) <= new Date()) {
+            notify('Schedule time must be in the future', 'error');
+            return;
+        }
         
         const btn = document.getElementById('poll-create-btn') as HTMLButtonElement;
         btn.disabled = true;
-        btn.textContent = 'Creating...';
+        btn.textContent = scheduleEnabled ? 'Scheduling...' : 'Creating...';
         
         try {
             // @ts-ignore
-            await Meteor.callAsync('poll.create', {
+            const result = await Meteor.callAsync('poll.create', {
                 question,
                 options,
                 roomId,
                 allowMultiple,
-                isAnonymous
+                isAnonymous,
+                scheduledAt: scheduledAt || undefined
             });
             
             container.remove();
-            notify('Poll created!', 'success');
+            
+            if (result.scheduled) {
+                notify(`Poll scheduled for ${new Date(result.scheduledFor).toLocaleString()}`, 'success');
+            } else {
+                notify('Poll created! Check the chat.', 'success');
+            }
         } catch (err: any) {
             notify(err?.reason || 'Failed to create poll', 'error');
             btn.disabled = false;
@@ -185,60 +288,14 @@ async function showPollModal() {
     };
     
     // Keyboard shortcuts
-    document.addEventListener('keydown', function escHandler(e) {
+    const escHandler = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
             container.remove();
             document.removeEventListener('keydown', escHandler);
         }
-    });
+    };
+    document.addEventListener('keydown', escHandler);
 }
-
-// Vote click interceptor - prevents loading state
-document.addEventListener('click', async (e) => {
-    const target = e.target as HTMLElement;
-    const button = target.closest('button[data-action-id]') as HTMLButtonElement;
-    
-    if (!button) return;
-    
-    const actionId = button.getAttribute('data-action-id') || '';
-    const value = button.getAttribute('data-value') || '';
-    
-    // Check if it's a vote action
-    if (actionId.startsWith('vote_') && value.includes('|')) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        
-        const [pollId, optionId] = value.split('|');
-        
-        try {
-            // @ts-ignore
-            await Meteor.callAsync('poll.vote', pollId, optionId);
-        } catch (err: any) {
-            notify(err?.reason || 'Vote failed', 'error');
-        }
-        return;
-    }
-    
-    // Check if it's a close action
-    if (actionId.startsWith('close_')) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        
-        const pollId = value;
-        
-        if (!confirm('Close this poll and publish results?')) return;
-        
-        try {
-            // @ts-ignore
-            await Meteor.callAsync('poll.close', pollId);
-            notify('Poll closed! Results published.', 'success');
-        } catch (err: any) {
-            notify(err?.reason || 'Failed to close poll', 'error');
-        }
-    }
-}, true);
 
 // Export - showPollModal is used by usePollAction hook
 export { showPollModal };
