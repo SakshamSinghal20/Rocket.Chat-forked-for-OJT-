@@ -435,7 +435,7 @@
 		"reflect-metadata": "^0.2.2",
 		"sanitize-html": "~2.16.0",
 		"semver": "^7.6.3",
-		"sharp": "^0.33.5",
+		"sharp": "^0.34.0",
 		"sip.js": "^0.21.2",
 		"sodium-native": "^4.3.3",
 		"sodium-plus": "^0.9.0",

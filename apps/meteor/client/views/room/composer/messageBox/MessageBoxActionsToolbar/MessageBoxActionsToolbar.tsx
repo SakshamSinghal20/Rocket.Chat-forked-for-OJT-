@@ -10,6 +10,7 @@ import { memo } from 'react';
 import { useAudioMessageAction } from './hooks/useAudioMessageAction';
 import { useCreateDiscussionAction } from './hooks/useCreateDiscussionAction';
 import { useFileUploadAction } from './hooks/useFileUploadAction';
+import { usePollAction } from './hooks/usePollAction';
 import { useShareLocationAction } from './hooks/useShareLocationAction';
 import { useTimestampAction } from './hooks/useTimestampAction';
 import { useVideoMessageAction } from './hooks/useVideoMessageAction';
@@ -58,6 +59,7 @@ const MessageBoxActionsToolbar = ({
 	const audioMessageAction = useAudioMessageAction(!canSend || typing || isRecording || isMicrophoneDenied, isMicrophoneDenied);
 	const videoMessageAction = useVideoMessageAction(!canSend || typing || isRecording);
 	const fileUploadAction = useFileUploadAction(!canSend || typing || isRecording);
+	const pollAction = usePollAction(!canSend || typing || isRecording);
 	const webdavActions = useWebdavActions();
 	const createDiscussionAction = useCreateDiscussionAction(room);
 	const shareLocationAction = useShareLocationAction(room, tmid);
@@ -70,6 +72,7 @@ const MessageBoxActionsToolbar = ({
 		...(!isHidden(hiddenActions, audioMessageAction) && { audioMessageAction }),
 		...(!isHidden(hiddenActions, videoMessageAction) && { videoMessageAction }),
 		...(!isHidden(hiddenActions, fileUploadAction) && { fileUploadAction }),
+		...(!isHidden(hiddenActions, pollAction) && { pollAction }),
 		...(!isHidden(hiddenActions, createDiscussionAction) && { createDiscussionAction }),
 		...(!isHidden(hiddenActions, shareLocationAction) && { shareLocationAction }),
 		...(timestampAction && !isHidden(hiddenActions, timestampAction) && { timestampAction }),
@@ -88,10 +91,10 @@ const MessageBoxActionsToolbar = ({
 	}
 
 	if (variant === 'small') {
-		featured.push(allActions.audioMessageAction, allActions.fileUploadAction);
+		featured.push(allActions.audioMessageAction, allActions.fileUploadAction, allActions.pollAction);
 		createNew.push(allActions.videoMessageAction);
 	} else {
-		featured.push(allActions.audioMessageAction, allActions.videoMessageAction, allActions.fileUploadAction);
+		featured.push(allActions.audioMessageAction, allActions.videoMessageAction, allActions.fileUploadAction, allActions.pollAction);
 	}
 
 	if (allActions.webdavActions) {

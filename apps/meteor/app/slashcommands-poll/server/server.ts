@@ -81,19 +81,19 @@ function calculateStats(poll: Poll, viewerId?: string) {
 async function canClosePoll(userId: string, poll: Poll): Promise<boolean> {
     // Poll creator can always close
     if (poll.creator === userId) return true;
-    
+
     // Check admin permission
     try {
         const isAdmin = await hasPermissionAsync(userId, 'admin');
         if (isAdmin) return true;
-        
+
         // Check if user is room owner/moderator
         const room = await Rooms.findOneById(poll.roomId, { projection: { u: 1 } });
         if (room?.u?._id === userId) return true;
     } catch {
         // Ignore permission check errors
     }
-    
+
     return false;
 }
 
@@ -113,14 +113,14 @@ async function getUserDisplayName(userId: string): Promise<string> {
 function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
     const stats = calculateStats(poll, viewerId);
     const blocks: any[] = [];
-    
+
     // Header with status
     const status = poll.isClosed ? ' 🔒 CLOSED' : '';
     blocks.push({
         type: 'section',
         text: { type: 'mrkdwn', text: '📊 *' + poll.question + '*' + status }
     });
-    
+
     // Poll settings info (NO poll ID shown)
     const info = [
         poll.isAnonymous ? '🔒 Anonymous' : '👁 Public',
@@ -130,23 +130,23 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
         type: 'context',
         elements: [{ type: 'mrkdwn', text: info.join(' • ') }]
     });
-    
+
     // Options - Clean layout without voter names inline
     stats.options.forEach((opt, i) => {
         const bar = generateProgressBar(opt.percentage);
         // Use text symbols instead of emojis for cleaner look
         const selector = opt.isSelected ? '●' : '○';
         const count = opt.votes;
-        
+
         // Clean format: Selector OptionText | Progress Bar | Count
         let optionLine = selector + ' *' + opt.text + '*';
         optionLine += '\n     ' + bar + '  ' + opt.percentage + '%  •  ' + count + ' vote' + (count !== 1 ? 's' : '');
-        
+
         const block: any = {
             type: 'section',
             text: { type: 'mrkdwn', text: optionLine }
         };
-        
+
         // Add vote button only if poll is open
         if (!poll.isClosed) {
             block.accessory = {
@@ -156,26 +156,26 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
                 actionId: 'pollvote_' + poll.id + '_' + opt.id
             };
         }
-        
+
         blocks.push(block);
     });
-    
+
     // Divider
     blocks.push({ type: 'divider' });
-    
+
     // Stats footer with View Voters button for public polls
-    const footerText = '📈 ' + stats.totalVotes + ' vote' + (stats.totalVotes !== 1 ? 's' : '') + 
-                       '  •  👥 ' + stats.totalVoters + ' voter' + (stats.totalVoters !== 1 ? 's' : '') +
-                       '  •  by ' + (poll.creatorName || 'Unknown');
-    
+    const footerText = '📈 ' + stats.totalVotes + ' vote' + (stats.totalVotes !== 1 ? 's' : '') +
+        '  •  👥 ' + stats.totalVoters + ' voter' + (stats.totalVoters !== 1 ? 's' : '') +
+        '  •  by ' + (poll.creatorName || 'Unknown');
+
     blocks.push({
         type: 'context',
         elements: [{ type: 'mrkdwn', text: footerText }]
     });
-    
+
     // Action buttons row
     const actionElements: any[] = [];
-    
+
     // View Voters button (only for public polls with votes)
     if (!poll.isAnonymous && stats.totalVotes > 0) {
         actionElements.push({
@@ -185,7 +185,7 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
             actionId: 'pollviewers_' + poll.id
         });
     }
-    
+
     if (!poll.isClosed) {
         actionElements.push({
             type: 'button',
@@ -203,14 +203,14 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
             actionId: 'pollexport_' + poll.id + '_both'
         });
     }
-    
+
     if (actionElements.length > 0) {
         blocks.push({
             type: 'actions',
             elements: actionElements
         });
     }
-    
+
     // Closed timestamp
     if (poll.isClosed && poll.closedAt) {
         blocks.push({
@@ -218,7 +218,7 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
             elements: [{ type: 'mrkdwn', text: '🔒 _Closed on ' + poll.closedAt.toLocaleString() + '_' }]
         });
     }
-    
+
     return blocks;
 }
 
@@ -228,10 +228,10 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
 
 function generatePieChartUrl(poll: Poll): string {
     const stats = calculateStats(poll);
-    
+
     // Filter out options with 0 votes for cleaner chart
     const nonZeroOptions = stats.options.filter(o => o.votes > 0);
-    
+
     // If no votes, show placeholder
     if (nonZeroOptions.length === 0) {
         const placeholderConfig = {
@@ -250,12 +250,12 @@ function generatePieChartUrl(poll: Poll): string {
         const json = encodeURIComponent(JSON.stringify(placeholderConfig));
         return 'https://quickchart.io/chart?c=' + json + '&backgroundColor=%232f343d&width=400&height=400';
     }
-    
+
     const labels = nonZeroOptions.map(o => o.text + ' (' + o.percentage + '%)');
     const data = nonZeroOptions.map(o => o.votes);
     const colors = ['#dc2626', '#2563eb', '#16a34a', '#ca8a04', '#9333ea', '#ea580c'];
     const bgColors = nonZeroOptions.map((_, i) => colors[i % colors.length]);
-    
+
     const chartConfig = {
         type: 'pie',
         data: {
@@ -288,14 +288,14 @@ function generatePieChartUrl(poll: Poll): string {
                     font: { weight: 'bold', size: 16 },
                     textShadowColor: 'rgba(0,0,0,0.5)',
                     textShadowBlur: 4,
-                    formatter: function(value: number) {
+                    formatter: function (value: number) {
                         return value > 0 ? value : '';
                     }
                 }
             }
         }
     };
-    
+
     const chartJson = encodeURIComponent(JSON.stringify(chartConfig));
     // Use equal width and height for perfect circle
     return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%232f343d&width=500&height=500&devicePixelRatio=2';
@@ -307,7 +307,7 @@ function generateBarChartUrl(poll: Poll): string {
     const data = stats.options.map(o => o.votes);
     const colors = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899'];
     const bgColors = stats.options.map((_, i) => colors[i % colors.length]);
-    
+
     // Vertical bar chart (bars go up from bottom) - NO legend
     const chartConfig = {
         type: 'bar',
@@ -326,8 +326,8 @@ function generateBarChartUrl(poll: Poll): string {
             responsive: true,
             maintainAspectRatio: true,
             legend: { display: false }, // Chart.js 2.x format
-            layout: { 
-                padding: { left: 20, right: 20, top: 20, bottom: 20 } 
+            layout: {
+                padding: { left: 20, right: 20, top: 20, bottom: 20 }
             },
             plugins: {
                 legend: false, // Disable legend completely
@@ -338,7 +338,7 @@ function generateBarChartUrl(poll: Poll): string {
                     align: 'top',
                     offset: 4,
                     font: { weight: 'bold', size: 14 },
-                    formatter: function(value: number) {
+                    formatter: function (value: number) {
                         return value;
                     }
                 }
@@ -346,21 +346,21 @@ function generateBarChartUrl(poll: Poll): string {
             scales: {
                 xAxes: [{
                     gridLines: { display: false },
-                    ticks: { 
-                        fontColor: '#e5e7eb', 
+                    ticks: {
+                        fontColor: '#e5e7eb',
                         fontSize: 13,
                         fontStyle: 'bold'
                     }
                 }],
                 yAxes: [{
-                    ticks: { 
+                    ticks: {
                         beginAtZero: true,
                         fontColor: '#9ca3af',
                         fontSize: 12,
                         stepSize: 1
                     },
-                    gridLines: { 
-                        display: true, 
+                    gridLines: {
+                        display: true,
                         color: 'rgba(75, 85, 99, 0.3)',
                         drawBorder: false
                     }
@@ -368,7 +368,7 @@ function generateBarChartUrl(poll: Poll): string {
             }
         }
     };
-    
+
     const chartJson = encodeURIComponent(JSON.stringify(chartConfig));
     // Square-ish chart, no stretching
     return 'https://quickchart.io/chart?c=' + chartJson + '&backgroundColor=%231f2937&width=500&height=400&devicePixelRatio=2';
@@ -378,41 +378,41 @@ function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar' | 'both'): { 
     const stats = calculateStats(poll);
     const emojis = ['🔴', '🔵', '🟢', '🟡', '🟣', '🟠'];
     const maxVotes = Math.max(...stats.options.map(o => o.votes));
-    
+
     // Build text summary
     let summary = '📊 **POLL RESULTS**\n\n';
     summary += '**' + poll.question + '**\n\n';
-    
+
     stats.options.forEach((opt, i) => {
         const emoji = emojis[i % emojis.length];
         const winner = (opt.votes === maxVotes && opt.votes > 0) ? ' 🏆' : '';
         summary += emoji + ' **' + opt.text + '**: ' + opt.percentage + '% (' + opt.votes + ')' + winner + '\n';
-        
+
         if (!poll.isAnonymous && opt.voterNames.length > 0) {
             summary += '   _' + opt.voterNames.join(', ') + '_\n';
         }
     });
-    
+
     summary += '\n👥 ' + stats.totalVoters + ' voters • 📝 ' + stats.totalVotes + ' votes';
     summary += '\n' + (poll.isAnonymous ? '🔒 Anonymous' : '👁 Public');
-    
+
     // Generate attachments based on type
     const attachments: any[] = [];
-    
+
     if (chartType === 'both' || chartType === 'pie') {
         attachments.push({
             image_url: generatePieChartUrl(poll),
             title: '🥧 Pie Chart'
         });
     }
-    
+
     if (chartType === 'both' || chartType === 'bar') {
         attachments.push({
             image_url: generateBarChartUrl(poll),
             title: '📊 Bar Chart'
         });
     }
-    
+
     // Add action buttons to the results message
     const blocks: any[] = [
         {
@@ -433,7 +433,7 @@ function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar' | 'both'): { 
             ]
         }
     ];
-    
+
     return { msg: summary, attachments, blocks };
 }
 
@@ -443,7 +443,7 @@ function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar' | 'both'): { 
 
 async function saveScheduledPollToDb(poll: Poll): Promise<void> {
     if (!poll.scheduledAt) return;
-    
+
     try {
         const doc: ScheduledPollDoc = {
             _id: poll.id,
@@ -458,7 +458,7 @@ async function saveScheduledPollToDb(poll: Poll): Promise<void> {
             scheduledAt: poll.scheduledAt,
             createdAt: poll.createdAt
         };
-        
+
         // Upsert to MongoDB using async method
         await ScheduledPolls.upsertAsync({ _id: poll.id }, { $set: doc });
         console.log('[Poll] 💾 Saved to MongoDB: ' + poll.id);
@@ -505,46 +505,46 @@ function recreatePollFromDoc(doc: ScheduledPollDoc): Poll {
 
 async function schedulePoll(poll: Poll): Promise<void> {
     if (!poll.scheduledAt) return;
-    
+
     // Save to MongoDB for persistence across restarts
     await saveScheduledPollToDb(poll);
-    
+
     // Clear any existing timer for this poll
     const existingTimer = scheduledTimers.get(poll.id);
     if (existingTimer) {
         Meteor.clearTimeout(existingTimer);
         scheduledTimers.delete(poll.id);
     }
-    
+
     const now = Date.now();
     const scheduledTime = poll.scheduledAt.getTime();
     const delay = scheduledTime - now;
-    
+
     console.log('[Poll] ⏰ Schedule info for ' + poll.id + ':');
     console.log('[Poll]   - Question: ' + poll.question);
     console.log('[Poll]   - Room: ' + poll.roomId);
     console.log('[Poll]   - Scheduled for: ' + poll.scheduledAt.toISOString());
     console.log('[Poll]   - Current time: ' + new Date(now).toISOString());
     console.log('[Poll]   - Delay: ' + Math.round(delay / 1000) + ' seconds');
-    
+
     if (delay <= 0) {
         // Already past, publish immediately
         console.log('[Poll] ⚡ Scheduled time already passed, publishing now: ' + poll.id);
         void publishPollAsync(poll);
         return;
     }
-    
+
     // Cap timeout to avoid overflow (max ~24 days)
     const maxDelay = 2147483647;
     const actualDelay = Math.min(delay, maxDelay);
-    
+
     console.log('[Poll] ⏱️ Setting timer for ' + poll.id + ' (' + Math.round(actualDelay / 1000) + 's)');
-    
+
     const pollId = poll.id; // Capture for closure
     const timer = Meteor.setTimeout(async () => {
         console.log('[Poll] 🔔 Timer fired for: ' + pollId);
         scheduledTimers.delete(pollId);
-        
+
         // Get poll from memory or recreate from DB
         let currentPoll = polls.get(pollId);
         if (!currentPoll) {
@@ -555,7 +555,7 @@ async function schedulePoll(poll: Poll): Promise<void> {
                 polls.set(pollId, currentPoll);
             }
         }
-        
+
         if (!currentPoll) {
             console.log('[Poll] ❌ Poll not found anywhere: ' + pollId);
             return;
@@ -565,10 +565,10 @@ async function schedulePoll(poll: Poll): Promise<void> {
             removeScheduledPollFromDb(poll.id);
             return;
         }
-        
+
         void publishPollAsync(currentPoll);
     }, actualDelay);
-    
+
     scheduledTimers.set(poll.id, timer);
     console.log('[Poll] ✅ Timer set successfully for: ' + poll.id);
 }
@@ -580,13 +580,13 @@ async function publishPollAsync(poll: Poll): Promise<void> {
         removeScheduledPollFromDb(poll.id);
         return;
     }
-    
+
     try {
         console.log('[Poll] 📤 Publishing scheduled poll: ' + poll.id);
         console.log('[Poll]   - Room: ' + poll.roomId);
         console.log('[Poll]   - Creator: ' + poll.creator);
         console.log('[Poll]   - Question: ' + poll.question);
-        
+
         // Validate room exists
         const room = await Rooms.findOneById(poll.roomId);
         if (!room) {
@@ -595,7 +595,7 @@ async function publishPollAsync(poll: Poll): Promise<void> {
             return;
         }
         console.log('[Poll]   - Room verified: ' + room.name);
-        
+
         // Validate user exists
         const user = await Users.findOneById(poll.creator);
         if (!user) {
@@ -604,25 +604,26 @@ async function publishPollAsync(poll: Poll): Promise<void> {
             return;
         }
         console.log('[Poll]   - User verified: ' + user.username);
-        
-        // Build poll blocks
-        const blocks = buildPollBlocks(poll, poll.creator);
+
+        // Build poll blocks - no viewerId for global broadcast
+        // Selection state should be neutral since messages are shared across all users
+        const blocks = buildPollBlocks(poll); // No viewerId = neutral state
         console.log('[Poll]   - Blocks built: ' + blocks.length + ' blocks');
-        
+
         // Send message
         const sent = await executeSendMessage(poll.creator, {
             rid: poll.roomId,
             msg: '',
             blocks: blocks
         });
-        
+
         if (sent?._id) {
             poll.messageId = sent._id;
             poll.scheduledAt = undefined;
-            
+
             // Remove from MongoDB since it's now published
             removeScheduledPollFromDb(poll.id);
-            
+
             console.log('[Poll] ✅ Successfully published: ' + poll.id);
             console.log('[Poll]   - Message ID: ' + sent._id);
         } else {
@@ -635,7 +636,7 @@ async function publishPollAsync(poll: Poll): Promise<void> {
         console.error('[Poll]   - Error message:', err?.message || err?.reason || String(err));
         console.error('[Poll]   - Error details:', err?.details || 'none');
         console.error('[Poll]   - Full error:', err);
-        
+
         // Don't remove from DB on error - allow retry
     }
 }
@@ -662,35 +663,35 @@ Meteor.methods({
         const room = await Rooms.findOneById(roomId, { projection: { _id: 1 } });
         if (!room) throw new Meteor.Error('invalid-room', 'Room not found');
         if (!question?.trim()) throw new Meteor.Error('invalid-question', 'Question required');
-        
+
         const cleanOptions = (options || []).map(o => o?.trim()).filter(Boolean);
         if (cleanOptions.length < 2) throw new Meteor.Error('invalid-options', 'Need at least 2 options');
 
         const creator = await Users.findOneById(userId, { projection: { name: 1, username: 1 } });
         const pollId = 'poll' + Date.now().toString(36);
-        
+
         // Parse scheduled time (datetime-local format: "2024-12-04T09:03")
         // The input is in user's local timezone, so we need to parse it correctly
         let scheduledDate: Date | undefined;
         if (scheduledAt) {
             console.log('[Poll] Parsing scheduledAt:', scheduledAt);
-            
+
             // datetime-local format doesn't include timezone
             // Parse as local time by creating date directly from the string
             // The string format "2024-12-04T09:03" is already local time
             scheduledDate = new Date(scheduledAt);
-            
+
             // If the date seems wrong (timezone issue), the input might be treated as UTC
             // In that case, we need to NOT convert - the Date constructor with ISO-like 
             // format without Z treats it as local time in modern browsers/Node
-            
+
             console.log('[Poll] Input string:', scheduledAt);
             console.log('[Poll] Parsed as:', scheduledDate.toString());
             console.log('[Poll] In ISO:', scheduledDate.toISOString());
             console.log('[Poll] Current time:', new Date().toString());
             console.log('[Poll] Is valid:', !isNaN(scheduledDate.getTime()));
             console.log('[Poll] Is in future:', scheduledDate > new Date());
-            
+
             if (isNaN(scheduledDate.getTime())) {
                 console.log('[Poll] ⚠️ Invalid date format, publishing immediately');
                 scheduledDate = undefined;
@@ -702,7 +703,7 @@ Meteor.methods({
                 console.log('[Poll] ✅ Valid future date, will schedule in ' + Math.round(delayMs / 1000) + ' seconds');
             }
         }
-        
+
         const poll: Poll = {
             id: pollId,
             question: question.trim(),
@@ -724,7 +725,7 @@ Meteor.methods({
             totalVoters: new Set()
         };
 
-            polls.set(pollId, poll);
+        polls.set(pollId, poll);
 
         // Handle scheduled polls
         if (scheduledDate) {
@@ -733,16 +734,16 @@ Meteor.methods({
                 console.log('[Poll]   - Question: ' + question);
                 console.log('[Poll]   - Scheduled for: ' + scheduledDate.toISOString());
                 console.log('[Poll]   - Room: ' + roomId);
-                
+
                 await schedulePoll(poll);
-                
+
                 console.log('[Poll] ✅ Scheduled poll created successfully: ' + pollId);
 
-        return { 
-            success: true, 
-            pollId, 
-                    scheduled: true, 
-                    scheduledFor: scheduledDate.toISOString() 
+                return {
+                    success: true,
+                    pollId,
+                    scheduled: true,
+                    scheduledFor: scheduledDate.toISOString()
                 };
             } catch (err: any) {
                 console.error('[Poll] ❌ Failed to schedule poll: ' + pollId);
@@ -755,13 +756,15 @@ Meteor.methods({
         // Publish immediately
         try {
             console.log('[Poll] Creating immediate poll: ' + pollId);
-            
+
+            // Don't pass viewerId - the poll message is global, not per-user
+            // Selection state should start neutral for everyone
             const sent = await executeSendMessage(userId, {
                 rid: roomId,
                 msg: '',
-                blocks: buildPollBlocks(poll, userId)
+                blocks: buildPollBlocks(poll) // No viewerId = neutral selection state
             });
-            
+
             if (sent?._id) {
                 poll.messageId = sent._id;
                 console.log('[Poll] ✅ Poll created: ' + pollId + ' -> ' + sent._id);
@@ -788,10 +791,10 @@ Meteor.methods({
 
         const wasSelected = option.voters.includes(userId);
         poll.totalVoters.add(userId);
-        
+
         // Get user display name for public polls
         const displayName = poll.isAnonymous ? '' : await getUserDisplayName(userId);
-        
+
         // Helper to safely remove voter from an option
         const removeVoterFromOption = (opt: PollOption, odUserId: string) => {
             const idx = opt.voters.indexOf(odUserId);
@@ -801,7 +804,7 @@ Meteor.methods({
                 opt.voterNames.splice(idx, 1);
             }
         };
-        
+
         // Helper to safely add voter to an option (prevents duplicates)
         const addVoterToOption = (opt: PollOption, odUserId: string, name: string) => {
             // Only add if not already in the list (prevent duplicates)
@@ -813,7 +816,7 @@ Meteor.methods({
                 }
             }
         };
-        
+
         if (poll.allowMultiple) {
             // Multiple choice: toggle this option
             if (wasSelected) {
@@ -826,16 +829,18 @@ Meteor.methods({
             poll.options.forEach(o => {
                 removeVoterFromOption(o, userId);
             });
-            
+
             // Add to selected option (only if not previously selected)
             if (!wasSelected) {
                 addVoterToOption(option, userId, displayName);
             }
         }
 
-        // Update message
+        // Update message - NOTE: Don't pass viewerId here because the message is
+        // broadcast to everyone. Selection state should be neutral (not pre-ticked)
+        // since each user's selection state is individual, not global.
         if (poll.messageId) {
-            const blocks = buildPollBlocks(poll, userId);
+            const blocks = buildPollBlocks(poll); // No viewerId = no pre-selections
             await Messages.updateOne(
                 { _id: poll.messageId },
                 { $set: { blocks, _updatedAt: new Date() } }
@@ -872,7 +877,7 @@ Meteor.methods({
         }
 
         if (poll.messageId) {
-            const blocks = buildPollBlocks(poll);
+            const blocks = buildPollBlocks(poll); // No viewerId for global broadcast
             await Messages.updateOne(
                 { _id: poll.messageId },
                 { $set: { blocks, _updatedAt: new Date() } }
@@ -907,10 +912,10 @@ Meteor.methods({
     async 'poll.canClose'(pollId: string) {
         const userId = Meteor.userId();
         if (!userId) return false;
-        
+
         const poll = polls.get(pollId);
         if (!poll) return false;
-        
+
         return await canClosePoll(userId, poll);
     },
 
@@ -918,13 +923,13 @@ Meteor.methods({
     async 'poll.getVoters'(pollId: string) {
         const userId = Meteor.userId();
         if (!userId) throw new Meteor.Error('not-authorized');
-        
+
         const poll = polls.get(pollId);
         if (!poll) throw new Meteor.Error('not-found', 'Poll not found');
-        
+
         // Don't reveal voters for anonymous polls
         if (poll.isAnonymous) {
-        return { 
+            return {
                 question: poll.question,
                 isAnonymous: true,
                 options: poll.options.map(o => ({
@@ -934,7 +939,7 @@ Meteor.methods({
                 }))
             };
         }
-        
+
         // Return voter names for public polls
         return {
             question: poll.question,
@@ -956,23 +961,23 @@ async function loadScheduledPollsFromDb(): Promise<void> {
     const now = Date.now();
     let rescheduled = 0;
     let published = 0;
-    
+
     try {
         // Load all scheduled polls from MongoDB using async
         const docs = await ScheduledPolls.find({}).fetchAsync();
         console.log('[Poll] 📂 Found ' + docs.length + ' scheduled polls in MongoDB');
-        
+
         for (const doc of docs) {
             console.log('[Poll] 📋 Loading scheduled poll: ' + doc.pollId);
             console.log('[Poll]   - Question: ' + doc.question);
             console.log('[Poll]   - Scheduled for: ' + doc.scheduledAt.toISOString());
-            
+
             // Recreate poll object
             const poll = recreatePollFromDoc(doc);
-            
+
             // Store in memory map
             polls.set(poll.id, poll);
-            
+
             // Check if time has passed
             if (doc.scheduledAt.getTime() <= now) {
                 console.log('[Poll] ⏰ Time passed, publishing immediately: ' + doc.pollId);
@@ -982,25 +987,25 @@ async function loadScheduledPollsFromDb(): Promise<void> {
                 // Set up timer (don't save to DB again since it's already there)
                 const delay = doc.scheduledAt.getTime() - now;
                 const actualDelay = Math.min(delay, 2147483647);
-                
+
                 console.log('[Poll] ⏱️ Re-scheduling: ' + doc.pollId + ' in ' + Math.round(actualDelay / 1000) + 's');
-                
+
                 const pollId = poll.id;
                 const timer = Meteor.setTimeout(() => {
                     console.log('[Poll] 🔔 Timer fired (from startup): ' + pollId);
                     scheduledTimers.delete(pollId);
-                    
+
                     const currentPoll = polls.get(pollId);
                     if (currentPoll && !currentPoll.messageId) {
                         void publishPollAsync(currentPoll);
                     }
                 }, actualDelay);
-                
+
                 scheduledTimers.set(poll.id, timer);
                 rescheduled++;
             }
         }
-        
+
         console.log('[Poll] ✅ Startup complete: ' + published + ' published, ' + rescheduled + ' rescheduled');
     } catch (err: any) {
         console.error('[Poll] ❌ Failed to load scheduled polls:', err?.message || err);
@@ -1011,15 +1016,15 @@ async function loadScheduledPollsFromDb(): Promise<void> {
 async function periodicCheck(): Promise<void> {
     try {
         const now = Date.now();
-        
+
         // Find all scheduled polls that should have been published by now
         const docs = await ScheduledPolls.find({ scheduledAt: { $lte: new Date(now) } }).fetchAsync();
-        
+
         if (docs.length > 0) {
             console.log('[Poll] 🔄 Periodic check found ' + docs.length + ' due polls at ' + new Date().toISOString());
             for (const doc of docs) {
                 console.log('[Poll]   - Publishing: ' + doc.pollId + ' (was scheduled for ' + doc.scheduledAt.toISOString() + ')');
-                
+
                 let poll = polls.get(doc.pollId);
                 if (!poll) {
                     poll = recreatePollFromDoc(doc);
@@ -1039,13 +1044,13 @@ async function periodicCheck(): Promise<void> {
 Meteor.startup(() => {
     console.log('[Poll] 🚀 Starting poll system...');
     console.log('[Poll] MongoDB collection: rocketchat_scheduled_polls');
-    
+
     // Initial load after 3 seconds
     Meteor.setTimeout(() => {
         console.log('[Poll] 📂 Running initial scheduled poll check...');
         void loadScheduledPollsFromDb();
     }, 3000);
-    
+
     // Periodic check every 15 seconds for any missed polls
     Meteor.setInterval(() => {
         void periodicCheck();

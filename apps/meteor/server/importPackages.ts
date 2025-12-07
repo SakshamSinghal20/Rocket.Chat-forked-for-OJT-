@@ -63,6 +63,7 @@ import '../app/slashcommands-mute/server';
 import '../app/slashcommands-status/server';
 import '../app/slashcommands-topic/server';
 import '../app/slashcommands-unarchiveroom/server';
+import '../app/slashcommands-poll/server';
 import '../app/smarsh-connector/server';
 import '../app/theme/server';
 import '../app/threads/server';
