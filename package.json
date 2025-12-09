@@ -5,6 +5,7 @@
 	"main": "index.js",
 	"private": true,
 	"scripts": {
+		"turbo": "turbo",
 		"build": "turbo run build",
 		"build:services": "turbo run build --filter=rocketchat-services...",
 		"testunit": "turbo run testunit",
