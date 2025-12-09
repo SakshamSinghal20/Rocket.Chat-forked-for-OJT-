@@ -31,6 +31,7 @@ interface Poll {
     createdAt: Date;
     scheduledAt?: Date;
     totalVoters: Set<string>;
+    chartsExported?: boolean;
 }
 
 // MongoDB type for scheduled polls (serializable)
@@ -194,8 +195,8 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
             actionId: 'pollclose_' + poll.id,
             style: 'danger'
         });
-    } else {
-        // Single export button for closed polls - exports both charts
+    } else if (!poll.chartsExported) {
+        // Single export button for closed polls - exports both charts (only if not already exported)
         actionElements.push({
             type: 'button',
             text: { type: 'plain_text', text: '📊 Export Charts', emoji: true },
@@ -413,9 +414,12 @@ function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar' | 'both'): { 
         });
     }
 
-    // Add action buttons to the results message
-    const blocks: any[] = [
-        {
+    // Add action buttons to the results message (only View Voters - charts already exported)
+    const blocks: any[] = [];
+
+    // Only show View Voters button for public polls
+    if (!poll.isAnonymous) {
+        blocks.push({
             type: 'actions',
             elements: [
                 {
@@ -423,16 +427,10 @@ function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar' | 'both'): { 
                     text: { type: 'plain_text', text: '👁 View Voters', emoji: true },
                     value: 'pollviewers_' + poll.id,
                     actionId: 'pollviewers_' + poll.id
-                },
-                {
-                    type: 'button',
-                    text: { type: 'plain_text', text: '📊 Export Charts', emoji: true },
-                    value: 'pollexport_' + poll.id + '_both',
-                    actionId: 'pollexport_' + poll.id + '_both'
                 }
             ]
-        }
-    ];
+        });
+    }
 
     return { msg: summary, attachments, blocks };
 }
@@ -895,6 +893,10 @@ Meteor.methods({
         const poll = polls.get(pollId);
         if (!poll) throw new Meteor.Error('not-found', 'Poll not found');
         if (!poll.isClosed) throw new Meteor.Error('not-closed', 'Close the poll first');
+        if (poll.chartsExported) throw new Meteor.Error('already-exported', 'Charts already exported');
+
+        // Mark as exported BEFORE sending to prevent double-clicks
+        poll.chartsExported = true;
 
         // Generate and send chart(s) with action buttons
         const type = chartType === 'bar' ? 'bar' : (chartType === 'both' ? 'both' : 'pie');
@@ -905,6 +907,16 @@ Meteor.methods({
             attachments,
             blocks
         });
+
+        // Update the original poll message to remove the Export Charts button
+        if (poll.messageId) {
+            const updatedBlocks = buildPollBlocks(poll);
+            await Messages.updateOne(
+                { _id: poll.messageId },
+                { $set: { blocks: updatedBlocks, _updatedAt: new Date() } }
+            );
+            await notifyOnMessageChange({ id: poll.messageId });
+        }
 
         return { success: true };
     },
