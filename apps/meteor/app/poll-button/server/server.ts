@@ -65,6 +65,7 @@ function generateProgressBar(percentage: number): string {
     const empty = width - filled;
     return '▓'.repeat(filled) + '░'.repeat(empty);
 }
+// VISUAL: Creates the ASCII progress bar (▓▓▓░░░) for each option
 
 function calculateStats(poll: Poll, viewerId?: string) {
     const totalVotes = poll.options.reduce((sum, o) => sum + o.votes, 0);
@@ -78,6 +79,7 @@ function calculateStats(poll: Poll, viewerId?: string) {
         }))
     };
 }
+// COMPUTATION: Aggregates votes, percentages, and checks selection state for the current viewer
 
 async function canClosePoll(userId: string, poll: Poll): Promise<boolean> {
     // Poll creator can always close
@@ -106,6 +108,7 @@ async function getUserDisplayName(userId: string): Promise<string> {
         return 'User';
     }
 }
+// PERMISSIONS & USER INFO: Validates if a user can close a poll and fetches display names for public polls
 
 // ============================================================================
 // Build Poll Blocks - WhatsApp Style
@@ -222,6 +225,8 @@ function buildPollBlocks(poll: Poll, viewerId?: string): any[] {
 
     return blocks;
 }
+// UI BUILDER: Constructs the Block Kit message layout (WhatsApp style)
+// Logic: Shows options, progress bars, and conditionally adds Vote/Close/Export buttons
 
 // ============================================================================
 // Generate Pie Chart Image URL (using QuickChart.io)
@@ -434,6 +439,8 @@ function generateChartMessage(poll: Poll, chartType: 'pie' | 'bar' | 'both'): { 
 
     return { msg: summary, attachments, blocks };
 }
+// CHARTING: Generates static chart images via QuickChart.io
+// Logic: Creates Pie/Bar charts and wraps them in a message attachment
 
 // ============================================================================
 // Schedule Poll - Persistent Implementation (survives server restart)
@@ -500,6 +507,8 @@ function recreatePollFromDoc(doc: ScheduledPollDoc): Poll {
         totalVoters: new Set()
     };
 }
+// PERSISTENCE: Handles MongoDB operations for Scheduled Polls
+// Goal: Ensures pending polls survive server restarts
 
 async function schedulePoll(poll: Poll): Promise<void> {
     if (!poll.scheduledAt) return;
@@ -570,6 +579,8 @@ async function schedulePoll(poll: Poll): Promise<void> {
     scheduledTimers.set(poll.id, timer);
     console.log('[Poll] ✅ Timer set successfully for: ' + poll.id);
 }
+// SCHEDULER: Core timer logic using Meteor.setTimeout
+// Logic: Calculates delay, sets timer, and handles publishing when time is up
 
 async function publishPollAsync(poll: Poll): Promise<void> {
     // Prevent double-publishing
@@ -638,6 +649,8 @@ async function publishPollAsync(poll: Poll): Promise<void> {
         // Don't remove from DB on error - allow retry
     }
 }
+// PUBLISHER: Final step to send the poll message to the room
+// Checks: Validates room/user, builds blocks, and executes the message send
 
 // ============================================================================
 // Meteor Methods
@@ -775,6 +788,8 @@ Meteor.methods({
             throw new Meteor.Error('create-failed', err?.reason || err?.message || 'Failed to create poll');
         }
     },
+    // METHOD: Handles Poll Creation (Immediate or Scheduled)
+    // Validation: Checks inputs, parses dates, and decides whether to post now or schedule
 
     async 'poll.vote'(pollId: string, optionId: string) {
         const userId = Meteor.userId();
@@ -848,6 +863,8 @@ Meteor.methods({
 
         return { success: true, option: option.text, voted: !wasSelected };
     },
+    // METHOD: Handles Voting Logic
+    // Logic: Toggles votes, supports Multi/Single choice, and updates the message in real-time
 
     async 'poll.close'(pollId: string) {
         const userId = Meteor.userId();
@@ -885,6 +902,8 @@ Meteor.methods({
 
         return { success: true };
     },
+    // METHOD: Closes the Poll
+    // Cleanup: Locks voting, records closure time, and cancels any pending timers
 
     async 'poll.export'(pollId: string, chartType?: 'pie' | 'bar' | 'both') {
         const userId = Meteor.userId();
@@ -920,6 +939,8 @@ Meteor.methods({
 
         return { success: true };
     },
+    // METHOD: Exports Result Charts
+    // Action: Posts Pie/Bar charts to the chat and removes the Export button
 
     async 'poll.canClose'(pollId: string) {
         const userId = Meteor.userId();
@@ -963,6 +984,8 @@ Meteor.methods({
             }))
         };
     }
+    // METHOD: Fetches Voter Data
+    // Privacy: Respects anonymous setting (hides names) or reveals them for public polls
 });
 
 // ============================================================================
@@ -1023,6 +1046,8 @@ async function loadScheduledPollsFromDb(): Promise<void> {
         console.error('[Poll] ❌ Failed to load scheduled polls:', err?.message || err);
     }
 }
+// STARTUP: Recovery System
+// Task: Loads pending polls from DB on boot and re-initializes their timers
 
 // Periodic check for any missed polls (runs every 15 seconds)
 async function periodicCheck(): Promise<void> {
@@ -1051,6 +1076,8 @@ async function periodicCheck(): Promise<void> {
         console.error('[Poll] ⚠️ Periodic check error:', err?.message || err);
     }
 }
+// SAFETY NET: Periodic (15s) Cron Job
+// Catches: Any polls that might have been missed by the main timer (e.g. during heavy load)
 
 // Run startup after Meteor is ready
 Meteor.startup(() => {
