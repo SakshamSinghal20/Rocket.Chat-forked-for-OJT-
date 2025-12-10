@@ -13,7 +13,7 @@ export const usePollAction = (disabled: boolean): GenericMenuItemProps => {
 			disabled,
 			onClick: () => {
 				// Import and show poll modal
-				import('../../../../../../../app/slashcommands-poll/client/pollModal').then(({ showPollModal }) => {
+				import('../../../../../../../app/poll-button/client/pollModal').then(({ showPollModal }) => {
 					showPollModal();
 				});
 			},

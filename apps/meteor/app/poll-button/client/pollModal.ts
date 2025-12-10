@@ -12,10 +12,10 @@ function getCurrentRoomId(): string | null {
         // @ts-ignore
         const opened = RoomManager.opened;
         if (opened && typeof opened === 'string') return opened;
-        
+
         const path = window.location.pathname;
         const parts = path.split('/');
-        
+
         for (const segment of ['channel', 'group', 'direct', 'room']) {
             const idx = parts.indexOf(segment);
             if (idx !== -1 && parts[idx + 1]) {
@@ -27,6 +27,8 @@ function getCurrentRoomId(): string | null {
         return window.location.pathname.split('/').pop() || null;
     }
 }
+// HELPER: Deterministically finds the current Room ID from Router state or URL URL
+// Essential because we need to know WHERE to post the poll
 
 function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {
     const container = document.getElementById('poll-toast') || (() => {
@@ -36,24 +38,26 @@ function showToast(message: string, type: 'success' | 'error' | 'info' = 'info')
         document.body.appendChild(div);
         return div;
     })();
-    
-    const colors: Record<string, string> = { 
-        success: '#22c55e', 
-        error: '#ef4444', 
-        info: '#3b82f6' 
+
+    const colors: Record<string, string> = {
+        success: '#22c55e',
+        error: '#ef4444',
+        info: '#3b82f6'
     };
-    
+
     const toast = document.createElement('div');
     toast.style.cssText = 'background:' + colors[type] + ';color:#fff;padding:12px 20px;border-radius:8px;margin-bottom:8px;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);transition:all 0.3s ease;';
     toast.textContent = message;
     container.appendChild(toast);
-    
+
     setTimeout(() => {
         toast.style.opacity = '0';
         toast.style.transform = 'translateX(20px)';
         setTimeout(() => toast.remove(), 300);
     }, 3000);
 }
+// HELPER: Shows temporary popup notifications (Success/Error) at top-right
+// Used for feedback like "Poll Created" or "Vote Registered"
 
 // ============================================================================
 // View Voters Modal
@@ -63,19 +67,19 @@ function showVotersModal(data: { question: string; isAnonymous: boolean; options
     // Remove existing modal if any
     const existing = document.getElementById('voters-modal-overlay');
     if (existing) existing.remove();
-    
+
     const overlay = document.createElement('div');
     overlay.id = 'voters-modal-overlay';
     overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;';
-    
+
     let optionsHtml = '';
     data.options.forEach((opt) => {
-        const votersList = data.isAnonymous 
+        const votersList = data.isAnonymous
             ? '<span style="color:#9ca3af;font-style:italic;">Anonymous voting - names hidden</span>'
-            : (opt.voters.length > 0 
+            : (opt.voters.length > 0
                 ? opt.voters.map(v => '<span style="background:#374151;padding:4px 10px;border-radius:12px;margin:3px;display:inline-block;font-size:13px;">' + v + '</span>').join('')
                 : '<span style="color:#6b7280;font-style:italic;">No votes yet</span>');
-        
+
         optionsHtml += '<div style="margin-bottom:16px;padding:12px;background:#1f2937;border-radius:8px;">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
             '<span style="font-weight:600;color:#e5e7eb;">' + opt.text + '</span>' +
@@ -84,7 +88,7 @@ function showVotersModal(data: { question: string; isAnonymous: boolean; options
             '<div style="color:#d1d5db;">' + votersList + '</div>' +
             '</div>';
     });
-    
+
     overlay.innerHTML = '<div style="background:#111827;border-radius:12px;width:90%;max-width:500px;max-height:80vh;overflow:auto;box-shadow:0 25px 50px rgba(0,0,0,0.5);">' +
         '<div style="padding:20px;border-bottom:1px solid #374151;display:flex;justify-content:space-between;align-items:center;">' +
         '<h3 style="margin:0;color:#f3f4f6;font-size:18px;">👥 Poll Voters</h3>' +
@@ -95,15 +99,17 @@ function showVotersModal(data: { question: string; isAnonymous: boolean; options
         optionsHtml +
         '</div>' +
         '</div>';
-    
+
     document.body.appendChild(overlay);
-    
+
     // Close handlers
     overlay.addEventListener('click', (e) => {
         if (e.target === overlay) overlay.remove();
     });
     document.getElementById('voters-modal-close')?.addEventListener('click', () => overlay.remove());
 }
+// COMPONENT: Renders the "Who Voted?" popup
+// Logic: Loops through options -> If anonymous, hide names; else show name badges
 
 // ============================================================================
 // Button Click Interceptor
@@ -114,7 +120,7 @@ function setupButtonInterceptor() {
         const target = event.target as HTMLElement;
         const button = target.closest('button');
         if (!button) return;
-        
+
         // Look for poll action in any attribute
         let actionValue = '';
         for (const attr of Array.from(button.attributes)) {
@@ -124,21 +130,21 @@ function setupButtonInterceptor() {
                 break;
             }
         }
-        
+
         if (!actionValue) return;
-        
+
         // Prevent default Rocket.Chat handling
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
-        
+
         // Handle vote
         if (actionValue.startsWith('pollvote_')) {
             const parts = actionValue.split('_');
             if (parts.length >= 3) {
                 const pollId = parts[1];
                 const optionId = parts[2];
-                
+
                 try {
                     // @ts-ignore
                     const result = await Meteor.callAsync('poll.vote', pollId, optionId);
@@ -153,11 +159,11 @@ function setupButtonInterceptor() {
             }
             return;
         }
-        
+
         // Handle close
         if (actionValue.startsWith('pollclose_')) {
             const pollId = actionValue.replace('pollclose_', '');
-            
+
             // Check permission first
             try {
                 // @ts-ignore
@@ -169,9 +175,9 @@ function setupButtonInterceptor() {
             } catch {
                 // Continue anyway, server will validate
             }
-            
+
             if (!confirm('Close this poll? Voting will be locked.')) return;
-            
+
             try {
                 // @ts-ignore
                 await Meteor.callAsync('poll.close', pollId);
@@ -181,12 +187,12 @@ function setupButtonInterceptor() {
             }
             return;
         }
-        
+
         // Handle export (always exports both charts)
         if (actionValue.startsWith('pollexport_')) {
             const parts = actionValue.replace('pollexport_', '').split('_');
             const pollId = parts[0];
-            
+
             try {
                 // @ts-ignore
                 await Meteor.callAsync('poll.export', pollId, 'both');
@@ -196,11 +202,11 @@ function setupButtonInterceptor() {
             }
             return;
         }
-        
+
         // Handle View Voters
         if (actionValue.startsWith('pollviewers_')) {
             const pollId = actionValue.replace('pollviewers_', '');
-            
+
             try {
                 // @ts-ignore
                 const result = await Meteor.callAsync('poll.getVoters', pollId);
@@ -210,11 +216,15 @@ function setupButtonInterceptor() {
             }
         }
     }, true);
-    
+
     console.log('[Poll] Button interceptor ready');
 }
+// CORE LOGIC: "The Security Guard"
+// Global listener that catches clicks on ANY poll button (Vote, Close, Export)
+// It parses the ID (e.g., 'pollvote_123_A') and calls the matching Server Method
 
-// Initialize interceptor
+// Initialization: Ensures the interceptor is set up once the DOM is ready.
+// This prevents issues where buttons might be clicked before the script has fully loaded.
 if (typeof window !== 'undefined') {
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', setupButtonInterceptor);
@@ -230,21 +240,21 @@ if (typeof window !== 'undefined') {
 export function showPollModal() {
     const existing = document.getElementById('poll-modal-overlay');
     if (existing) existing.remove();
-    
+
     const roomId = getCurrentRoomId();
     if (!roomId) {
         showToast('Open a channel first', 'error');
         return;
     }
-    
+
     // Create modal
     const overlay = document.createElement('div');
     overlay.id = 'poll-modal-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:99999;';
-    
+
     const modal = document.createElement('div');
     modal.style.cssText = 'background:#1f2329;color:#e4e7ea;width:500px;max-width:95vw;max-height:90vh;overflow-y:auto;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.5);';
-    
+
     modal.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #2f343d;position:sticky;top:0;background:#1f2329;">
             <h3 style="margin:0;font-size:18px;">📊 Create Poll</h3>
@@ -306,42 +316,44 @@ export function showPollModal() {
             <button id="poll-create" style="padding:10px 20px;background:#1d74f5;border:none;color:#fff;border-radius:4px;cursor:pointer;font-size:14px;font-weight:500;">Create Poll</button>
         </div>
     `;
-    
+
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
-    
+    // UI BUILDER: Injects the raw HTML string for the entire form
+    // Contains: Header, Question Input, Options Container, Settings Toggles
+
     // Set min datetime to now
     const scheduleInput = document.getElementById('poll-schedule-time') as HTMLInputElement;
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset() + 5);
     scheduleInput.min = now.toISOString().slice(0, 16);
     scheduleInput.value = now.toISOString().slice(0, 16);
-    
+
     // Focus question
     setTimeout(() => (document.getElementById('poll-question') as HTMLInputElement)?.focus(), 100);
-    
+
     // Close handlers
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
     document.getElementById('poll-modal-close')!.onclick = () => overlay.remove();
     document.getElementById('poll-cancel')!.onclick = () => overlay.remove();
-    
+
     // Schedule toggle
     document.getElementById('poll-schedule-toggle')!.onchange = (e) => {
         const checked = (e.target as HTMLInputElement).checked;
         document.getElementById('poll-schedule-container')!.style.display = checked ? 'block' : 'none';
     };
-    
+
     // Add option
     const optionColors = ['#f87171', '#60a5fa', '#34d399', '#fbbf24', '#a78bfa', '#fb7185'];
     document.getElementById('poll-add-option')!.onclick = () => {
         const container = document.getElementById('poll-options-container')!;
         const count = container.querySelectorAll('.poll-option-row').length;
-        
+
         if (count >= 6) {
             showToast('Maximum 6 options', 'info');
             return;
         }
-        
+
         const letter = String.fromCharCode(65 + count);
         const row = document.createElement('div');
         row.className = 'poll-option-row';
@@ -352,16 +364,16 @@ export function showPollModal() {
                 style="flex:1;padding:12px;background:#2f343d;border:1px solid #414852;border-radius:4px;color:#e4e7ea;font-size:14px;">
             <button class="poll-remove-option" style="background:none;border:none;color:#ef4444;font-size:20px;cursor:pointer;padding:8px;">×</button>
         `;
-        
+
         row.querySelector('.poll-remove-option')!.addEventListener('click', () => {
             row.remove();
             updateOptionLabels();
         });
-        
+
         container.appendChild(row);
         (row.querySelector('.poll-option-input') as HTMLInputElement).focus();
     };
-    
+
     function updateOptionLabels() {
         const rows = document.querySelectorAll('.poll-option-row');
         rows.forEach((row, i) => {
@@ -372,7 +384,9 @@ export function showPollModal() {
             }
         });
     }
-    
+    // DYNAMIC UI: Manages adding/removing options
+    // Logic: Enforces Max 6 options, auto-assigns labels (A, B, C...) and colors
+
     // Create poll
     document.getElementById('poll-create')!.onclick = async () => {
         const question = (document.getElementById('poll-question') as HTMLInputElement).value.trim();
@@ -381,7 +395,7 @@ export function showPollModal() {
         const allowMultiple = (document.getElementById('poll-multiple') as HTMLInputElement).checked;
         const isAnonymous = (document.getElementById('poll-anonymous') as HTMLInputElement).checked;
         const scheduleEnabled = (document.getElementById('poll-schedule-toggle') as HTMLInputElement).checked;
-        
+
         // Get scheduled time and convert to ISO string with timezone
         let scheduledAt: string | null = null;
         if (scheduleEnabled) {
@@ -396,7 +410,7 @@ export function showPollModal() {
                 console.log('[Poll] As ISO:', scheduledAt);
             }
         }
-        
+
         if (!question) {
             showToast('Enter a question', 'error');
             return;
@@ -409,11 +423,11 @@ export function showPollModal() {
             showToast('Schedule time must be in the future', 'error');
             return;
         }
-        
+
         const btn = document.getElementById('poll-create') as HTMLButtonElement;
         btn.disabled = true;
         btn.textContent = 'Creating...';
-        
+
         try {
             // @ts-ignore
             const result = await Meteor.callAsync('poll.create', {
@@ -424,9 +438,9 @@ export function showPollModal() {
                 isAnonymous,
                 scheduledAt: scheduledAt || undefined
             });
-            
+
             overlay.remove();
-            
+
             if (result.scheduled) {
                 showToast('Poll scheduled for ' + new Date(result.scheduledFor).toLocaleString(), 'success');
             } else {
@@ -438,7 +452,10 @@ export function showPollModal() {
             btn.textContent = 'Create Poll';
         }
     };
-    
+    // SUBMISSION: Final Validation & Server Call
+    // Checks: 1. Question exists? 2. At least 2 options? 3. Date in future?
+    // If valid -> Calls Meteor.call('poll.create') -> Server takes over
+
     // Escape to close
     const escHandler = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
@@ -462,6 +479,9 @@ export const PollModal = {
     openPollModal: showPollModal,
     showPollModal: showPollModal
 };
+
+// EXPORTS: Exposes the function globally
+// Allows other files (like usePollAction.ts) to trigger this modal easily
 
 if (typeof window !== 'undefined') {
     (window as any).PollModal = PollModal;
